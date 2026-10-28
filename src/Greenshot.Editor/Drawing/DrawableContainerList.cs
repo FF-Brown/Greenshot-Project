@@ -895,7 +895,7 @@ namespace Greenshot.Editor.Drawing
                 return;
             }
 
-            Expansion expansion = GetExpansionFromSize(direction, targetElement.Bounds.Size);
+            Expansion expansion = GetExpansionFromSize(direction, targetElement.VisibleBounds.Size);
             
             surface.ResizeCanvas(expansion);
 

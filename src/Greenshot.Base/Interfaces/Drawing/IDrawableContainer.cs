@@ -77,6 +77,9 @@ namespace Greenshot.Base.Interfaces.Drawing
 
         NativeRect Bounds { get; }
 
+        /// <summary>Bounds of the rendered element, excluding selection adorners and invalidation margins.</summary>
+        NativeRect VisibleBounds { get; }
+
         NativeRect DrawingBounds { get; }
 
         void ApplyBounds(NativeRectFloat newBounds);

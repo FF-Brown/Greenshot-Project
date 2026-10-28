@@ -160,6 +160,25 @@ namespace Greenshot.Editor.Drawing
             }
         }
 
+        public override NativeRect VisibleBounds
+        {
+            get
+            {
+                int lineThickness = Math.Max(1, GetFieldValueAsInt(FieldType.LINE_THICKNESS));
+                using GraphicsPath bubble = CreateBubble(lineThickness);
+                using GraphicsPath tail = CreateTail();
+                using Matrix matrix = new Matrix();
+                using Pen pen = new Pen(Color.White, lineThickness);
+                NativeRect visible = Rectangle.Round(bubble.GetBounds(matrix, pen));
+                visible = visible.Union(Rectangle.Round(tail.GetBounds(matrix, pen))).Inflate(1, 1);
+                if (GetFieldValueAsBool(FieldType.SHADOW))
+                {
+                    visible = visible.Union(new NativeRect(visible.Left + 6, visible.Top + 6, visible.Width, visible.Height));
+                }
+                return visible;
+            }
+        }
+
         /// <summary>
         /// Helper method to create the bubble GraphicsPath, so we can also calculate the bounds
         /// </summary>

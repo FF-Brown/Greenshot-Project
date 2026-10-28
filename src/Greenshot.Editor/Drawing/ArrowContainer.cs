@@ -133,6 +133,30 @@ namespace Greenshot.Editor.Drawing
             }
         }
 
+        public override NativeRect VisibleBounds
+        {
+            get
+            {
+                int lineThickness = GetFieldValueAsInt(FieldType.LINE_THICKNESS);
+                if (lineThickness <= 0)
+                {
+                    return Bounds;
+                }
+
+                using Pen pen = new Pen(Color.White, lineThickness);
+                SetArrowHeads((ArrowHeadCombination)GetFieldValue(FieldType.ARROWHEADS), pen);
+                using GraphicsPath path = new GraphicsPath();
+                path.AddLine(Left, Top, Left + Width, Top + Height);
+                using Matrix matrix = new Matrix();
+                NativeRect bounds = Rectangle.Round(path.GetBounds(matrix, pen)).Inflate(1, 1);
+                if (GetFieldValueAsBool(FieldType.SHADOW))
+                {
+                    bounds = bounds.Union(new NativeRect(bounds.Left + 4, bounds.Top + 4, bounds.Width, bounds.Height));
+                }
+                return bounds;
+            }
+        }
+
         public override bool ClickableAt(int x, int y)
         {
             int lineThickness = GetFieldValueAsInt(FieldType.LINE_THICKNESS) + 10;

@@ -247,6 +247,8 @@ namespace Greenshot.Editor.Drawing
 
         public override NativeRect DrawingBounds => ImageBounds;
 
+        public override NativeRect VisibleBounds => ImageBounds;
+
         public override void MoveBy(int dx, int dy)
         {
             SpanImage();

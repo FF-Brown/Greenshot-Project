@@ -258,6 +258,8 @@ namespace Greenshot.Editor.Drawing
             }
         }
 
+        public override NativeRect VisibleBounds => Bounds;
+
         public override void MoveBy(int dx, int dy)
         {
             base.MoveBy(_horizontal ? 0 : dx, _horizontal ? dy : 0);

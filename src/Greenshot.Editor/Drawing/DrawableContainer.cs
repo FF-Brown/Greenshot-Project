@@ -287,6 +287,26 @@ namespace Greenshot.Editor.Drawing
             }
         }
 
+        /// <summary>
+        /// Bounds of the rendered element, excluding selection adorners and invalidation margins.
+        /// </summary>
+        public virtual NativeRect VisibleBounds
+        {
+            get
+            {
+                var bounds = Bounds;
+                int lineThickness = HasField(FieldType.LINE_THICKNESS) ? Math.Max(0, GetFieldValueAsInt(FieldType.LINE_THICKNESS)) : 0;
+                int stroke = (lineThickness + 1) / 2;
+                bounds = bounds.Inflate(stroke, stroke);
+                if (HasField(FieldType.SHADOW) && GetFieldValueAsBool(FieldType.SHADOW))
+                {
+                    var shadowBounds = new NativeRect(bounds.Left + 5, bounds.Top + 5, bounds.Width, bounds.Height);
+                    bounds = bounds.Union(shadowBounds);
+                }
+                return bounds;
+            }
+        }
+
         public virtual void ApplyBounds(NativeRectFloat newBounds)
         {
             Left = Round(newBounds.Left);
@@ -744,7 +764,7 @@ namespace Greenshot.Editor.Drawing
         /// <param name="surface">The surface the container belongs to.</param>
         public void SnapToEdge(Direction direction, Size surfaceSize)
         {
-            var bounds = Bounds;
+            var bounds = VisibleBounds;
             int dx = 0;
             int dy = 0;
             switch (direction)
