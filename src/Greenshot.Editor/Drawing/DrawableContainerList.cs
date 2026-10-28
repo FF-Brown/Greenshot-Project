@@ -755,7 +755,10 @@ namespace Greenshot.Editor.Drawing
             {
                 menu.Items.Add(GetPushOutSubMenu(surface));
             }
-            menu.Items.Add(GetFitSubMenu(surface));
+            if (!HasFixedAspectRatio() && (CanFitToSurface(true) || CanFitToSurface(false)))
+            {
+                menu.Items.Add(GetFitSubMenu(surface));
+            }
             menu.Items.Add(GetSnapSubMenu(surface));
 
             #endregion Push Out, Fit, Snap
@@ -1016,29 +1019,39 @@ namespace Greenshot.Editor.Drawing
         {
             var fitSubmenu = new ToolStripMenuItem(Texts.Editor.Fit);
 
-            // Fit width
-            var item = new ToolStripMenuItem(Texts.Editor.ResizeWidth)
+            if (CanFitToSurface(true))
             {
-                Image = EmbeddedResources.GetImage(typeof(ImageEditorForm), "Fit-width.Image")
-            };
-            item.Click += delegate
-            {
-                FitAllToSurface(true, surface);
-            };
-            fitSubmenu.DropDownItems.Add(item);
+                var item = new ToolStripMenuItem(Texts.Editor.ResizeWidth)
+                {
+                    Image = EmbeddedResources.GetImage(typeof(ImageEditorForm), "Fit-width.Image")
+                };
+                item.Click += delegate { FitAllToSurface(true, surface); };
+                fitSubmenu.DropDownItems.Add(item);
+            }
 
-            // Fit height
-            item = new ToolStripMenuItem(Texts.Editor.ResizeHeight)
+            if (CanFitToSurface(false))
             {
-                Image = EmbeddedResources.GetImage(typeof(ImageEditorForm), "Fit-height.Image")
-            };
-            item.Click += delegate
-            {
-                FitAllToSurface(false, surface);
-            };
-            fitSubmenu.DropDownItems.Add(item);
+                var item = new ToolStripMenuItem(Texts.Editor.ResizeHeight)
+                {
+                    Image = EmbeddedResources.GetImage(typeof(ImageEditorForm), "Fit-height.Image")
+                };
+                item.Click += delegate { FitAllToSurface(false, surface); };
+                fitSubmenu.DropDownItems.Add(item);
+            }
 
             return fitSubmenu;
+        }
+
+        private bool HasFixedAspectRatio()
+        {
+            return this.Any(container => container is IHaveScaleOptions scaleOptions &&
+                (scaleOptions.GetScaleOptions() & ScaleOptions.Rational) == ScaleOptions.Rational);
+        }
+
+        private bool CanFitToSurface(bool horizontal)
+        {
+            return this.Any(container => container is not LineContainer ||
+                (horizontal ? container.Width != 0 : container.Height != 0));
         }
 
         /// <summary>Stretches every element to the surface width or height and aligns it to the corresponding edge.</summary>
@@ -1051,17 +1064,47 @@ namespace Greenshot.Editor.Drawing
                 return;
             }
 
+            if (HasFixedAspectRatio())
+            {
+                return;
+            }
+
+            var containersToFit = this.Where(container => container is not LineContainer ||
+                (horizontal ? container.Width != 0 : container.Height != 0)).ToList();
+            if (containersToFit.Count == 0)
+            {
+                return;
+            }
+
             MakeBoundsChangeUndoable(false);
-            foreach (IDrawableContainer container in this)
+            foreach (IDrawableContainer container in containersToFit)
             {
                 if (horizontal)
                 {
-                    container.Width = container.Width < 0 ? -surfaceSize.Width : surfaceSize.Width;
+                    if (container is LineContainer)
+                    {
+                        float scale = surfaceSize.Width / (float)Math.Abs(container.Width);
+                        container.Width = container.Width < 0 ? -surfaceSize.Width : surfaceSize.Width;
+                        container.Height = (int)Math.Round(container.Height * scale);
+                    }
+                    else
+                    {
+                        container.Width = container.Width < 0 ? -surfaceSize.Width : surfaceSize.Width;
+                    }
                     container.SnapToEdge(Direction.LEFT, surfaceSize);
                 }
                 else
                 {
-                    container.Height = container.Height < 0 ? -surfaceSize.Height : surfaceSize.Height;
+                    if (container is LineContainer)
+                    {
+                        float scale = surfaceSize.Height / (float)Math.Abs(container.Height);
+                        container.Height = container.Height < 0 ? -surfaceSize.Height : surfaceSize.Height;
+                        container.Width = (int)Math.Round(container.Width * scale);
+                    }
+                    else
+                    {
+                        container.Height = container.Height < 0 ? -surfaceSize.Height : surfaceSize.Height;
+                    }
                     container.SnapToEdge(Direction.TOP, surfaceSize);
                 }
             }
