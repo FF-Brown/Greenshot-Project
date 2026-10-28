@@ -897,13 +897,35 @@ namespace Greenshot.Editor.Drawing
 
             Expansion expansion = GetExpansionFromSize(direction, targetElement.Bounds.Size);
             
-            surface.ResizeCanvas(expansion);
+            IMemento canvasMemento = null;
+            if (surface is Surface concreteSurface)
+            {
+                canvasMemento = concreteSurface.ResizeCanvasForUndo(expansion);
+            }
+            else
+            {
+                surface.ResizeCanvas(expansion);
+            }
 
             Size surfaceSize = GetSurfaceSize(surface);
             if (!surfaceSize.IsEmpty)
             {
-                targetElement.MakeBoundsChangeUndoable(false);
+                IMemento elementMemento = surface is Surface && targetElement.IsUndoable
+                    ? new DrawableContainerBoundsChangeMemento(targetElement)
+                    : null;
+                if (elementMemento == null)
+                {
+                    targetElement.MakeBoundsChangeUndoable(false);
+                }
                 targetElement.SnapToEdge(direction, surfaceSize);
+                if (canvasMemento != null)
+                {
+                    surface.MakeUndoable(new CompositeMemento(canvasMemento, elementMemento), false);
+                }
+                else if (elementMemento != null)
+                {
+                    surface.MakeUndoable(elementMemento, false);
+                }
             }
 
             surface.DeselectAllElements();

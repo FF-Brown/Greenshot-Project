@@ -758,6 +758,7 @@ namespace Greenshot.Editor.Drawing
                 var image = mementos[i] switch
                 {
                     SurfaceBackgroundChangeMemento backgroundChangeMemento => backgroundChangeMemento.Image,
+                    CompositeMemento compositeMemento => compositeMemento.Image,
                     SurfaceCutOutMemento cutOutMemento => cutOutMemento.Image,
                     _ => null
                 };
@@ -1272,10 +1273,21 @@ namespace Greenshot.Editor.Drawing
         /// <param name="expansion">The amount to expand in each direction.</param>
         public void ResizeCanvas(Expansion expansion)
         {
+            ResizeCanvasInternal(expansion, true);
+        }
+
+        internal IMemento ResizeCanvasForUndo(Expansion expansion)
+        {
+            return ResizeCanvasInternal(expansion, false);
+        }
+
+        private IMemento ResizeCanvasInternal(Expansion expansion, bool makeUndoable)
+        {
             var resizeEffect = new ResizeCanvasEffect(expansion.Left, expansion.Right, expansion.Top, expansion.Bottom);
             // Fast enough for the UI thread
-            ApplyEffectResult(resizeEffect, Image);
+            IMemento memento = ApplyEffectResult(resizeEffect, Image, makeUndoable);
             _surfaceExpanded?.Invoke(this, EventArgs.Empty);
+            return memento;
         }
 
         /// <summary>
@@ -1355,9 +1367,14 @@ namespace Greenshot.Editor.Drawing
         /// </summary>
         private void ApplyEffectResult(IEffect effect, Image sourceImage)
         {
+            ApplyEffectResult(effect, sourceImage, true);
+        }
+
+        private IMemento ApplyEffectResult(IEffect effect, Image sourceImage, bool makeUndoable)
+        {
             var matrix = new Matrix();
             var newImage = ImageHelper.ApplyEffect(sourceImage, effect, matrix);
-            ApplyEffectResult(ReferenceEquals(newImage, sourceImage) ? null : newImage, matrix);
+            return ApplyEffectResult(ReferenceEquals(newImage, sourceImage) ? null : newImage, matrix, makeUndoable);
         }
 
         /// <summary>
@@ -1365,24 +1382,33 @@ namespace Greenshot.Editor.Drawing
         /// </summary>
         private void ApplyEffectResult(Image newImage, Matrix matrix)
         {
+            ApplyEffectResult(newImage, matrix, true);
+        }
+
+        private IMemento ApplyEffectResult(Image newImage, Matrix matrix, bool makeUndoable)
+        {
             if (newImage == null)
             {
                 // clean up matrix, as it hasn't been used in the undo stack.
                 matrix.Dispose();
-                return;
+                return null;
             }
 
             var imageRectangle = new NativeRect(NativePoint.Empty, Image.Size);
             // Make sure the elements move according to the offset the effect made the bitmap move
             _elements.Transform(matrix);
-            // Make undoable
-            MakeUndoable(new SurfaceBackgroundChangeMemento(this, matrix), false);
+            var memento = new SurfaceBackgroundChangeMemento(this, matrix);
+            if (makeUndoable)
+            {
+                MakeUndoable(memento, false);
+            }
             SetImage(newImage, false);
             Invalidate();
             if (_surfaceSizeChanged != null && !imageRectangle.Equals(new NativeRect(NativePoint.Empty, newImage.Size)))
             {
                 _surfaceSizeChanged(this, null);
             }
+            return makeUndoable ? null : memento;
         }
 
         /// <summary>
