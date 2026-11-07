@@ -23,7 +23,7 @@
 ### Prerequisites
 - **Operating System**: Windows (Linux/Mac not supported for building)
 - **Build Tools**: Visual Studio 2026 with the Desktop development with C++ workload, MSVC v145 x64/x86 build tools, Windows 10 SDK, and the .NET Framework 4.8 Developer Pack
-- **.NET SDK**: .NET SDK 10.0.100 or newer (the MCP server targets .NET 10)
+- **.NET SDK**: .NET SDK 10.0.114 or newer (the MCP server targets .NET 10; older SDKs bring a vulnerable ILCompiler, GHSA-p3jp-9v83-76w9)
 - **Target Frameworks**: Most projects target .NET Framework 4.8 (`net480`); `Greenshot.Mcp` targets `net10.0-windows`
 - **Git Clone**: MUST use full clone with history (NOT shallow clone) due to Nerdbank.GitVersioning requirements
 
@@ -203,6 +203,7 @@ $env:Imgur13_ClientId = "your_id"
 - UI changes: WPF in the `Views`/`ViewModels` folders of the feature, WinForms in `src/Greenshot/Forms/` or `src/Greenshot.Editor/Forms/`; styles, texts and settings: see `docs/vNext/ui-how-to.md`
 - Documentation: `docs/` describes the released 1.3, `docs/vNext/` what is new in 1.4 (`main`); document new features in `docs/vNext/`
 - New plugin language packs use INI format: `Languages/greenshot.{plugin}.{locale}.ini`
+- Recipe format (`docs/vNext/recipe.schema.json`, steps, triggers, options): the recipes of the catalog [greenshot/greenshot-recipes](https://github.com/greenshot/greenshot-recipes) must stay valid; the `Recipe catalog` check validates them against the PR's schema, so a breaking change needs a matching PR there
 
 ### Modifying Plugins
 Each plugin in `src/Greenshot.Plugin.*/` is self-contained. Changes are automatically copied to main output via post-build events.

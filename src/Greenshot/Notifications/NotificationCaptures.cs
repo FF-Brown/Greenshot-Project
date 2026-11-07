@@ -33,6 +33,7 @@ using Greenshot.Base.Core.FileFormat;
 using Greenshot.Base.Interfaces;
 using Greenshot.Base.Interfaces.Plugin;
 using Greenshot.Base.Recipes.Pipeline;
+using Greenshot.Base.Recipes.Triggers;
 using Greenshot.Base.Threading;
 using Greenshot.Editor.Drawing;
 using Greenshot.Editor.Forms;
@@ -191,27 +192,17 @@ namespace Greenshot.Notifications
                 return false;
             }
 
-            var recipe = RecipeManager.Instance.GetRecipeById(NotificationRecipes.RecipeIdNotification);
+            // Like the browser extension: the first recipe with a Notification trigger, else the built-in one
+            var recipe = RecipeManager.Instance.GetAllRecipes()?.FirstOrDefault(r => r != null && r.IsEnabled && r.Triggers != null && r.Triggers.Any(t =>
+                             t.IsActive && string.Equals(t.TriggerType, TriggerConfig.TypeNotification, StringComparison.OrdinalIgnoreCase)))
+                         ?? RecipeManager.Instance.GetRecipeById(NotificationRecipes.RecipeIdNotification);
             if (recipe?.IsEnabled != true)
             {
                 surface.Dispose();
                 return false;
             }
 
-            surface.CaptureDetails ??= new CaptureDetails();
-            var payload = new CapturePayload
-            {
-                Surface = surface,
-                RawCapture = new Capture(surface.GetImageForExport())
-                {
-                    CaptureDetails = surface.CaptureDetails
-                }
-            };
-            CaptureFlowRunner.Current.Start(recipe, configure: context =>
-            {
-                context.Payload = payload;
-                context.IsPayloadPreSupplied = true;
-            });
+            CaptureFlowRunner.StartWithCapture(recipe, surface);
             return true;
         }
 

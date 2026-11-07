@@ -36,20 +36,45 @@ Continuous builds are automatically created for every commit to the `main` branc
 - The "+" after the tabs adds a new image, its size and color are in the settings
 - Closing a window with several changed captures asks once: save all, discard all or cancel
 
+**Viewer** (#937, #1624)
+- A new destination shows the capture in a small window of its own, e.g. kept on top to compare it with the screen
+- Real size (1:1), zoom and pan with an overview, only the capture or a thin title bar, an optional border, keys for everything (H shows them)
+- Export from the viewer with the destination window of the recipes
+- Settings on the new Viewer tab
+- By @Lakritzator and @daxliniere
+
+**Ask for destination in a window**
+- New destination "Ask for destination every time, in a window": instead of the menu, a window with a preview of the capture and a search
+- The editor recipes can change the capture in that window before it goes to a destination, also when exporting from the viewer
+
 **Emoji Support** (#358)
 - Added a new "Emoji" object type to the editor
 - Insert emojis directly into your screenshots
+- A panel at the right of the editor shows the size and position of the selected element and the emoji picker, with a search for emojis
 - Contributed by @jairbubbles
+
+**Stamps** (Beta)
+- Collect small images (PNG, SVG and more) in categories, with names and tags, search them and insert them into the editor with Ctrl+Shift+K
+- Add stamps by dropping images from a web page
+- An SVG stamp stays sharp when it is resized
+- Copy or drag a stamp into other programs
 
 **Text Redaction with OCR** (Beta) (#947)
 - Automatically detect and redact text in screenshots using OCR technology
 - Useful for privacy protection and sensitive information removal
 - Beta feature by @Lakritzator
 
+**Stronger blur and pixelate**
+- A new blur or pixelate area over text gets a strength that fits that text, so large text is hidden as well as small text. When the text wasn't recognized yet, OCR runs once in the background
+- An OCR badge in the editor's status bar shows whether the text of the capture is recognized
+
 **Remove Transparency Feature** (#945)
 - New option to remove transparency from images in the editor
 - Helpful for certain export formats and use cases
 - Added by @Lakritzator
+
+**Grayscale**
+- Grayscale keeps the brightness of colors
 
 #### ⚙️ Command Line Interface
 
@@ -78,8 +103,10 @@ Continuous builds are automatically created for every commit to the `main` branc
 - The area follows the mouse and lines up with the edges of windows and the screen; hold Alt to place it freely
 - The mouse holds the area at its top left corner, so the magnifier shows exactly where it starts; press C for another corner or the middle
 - The magnifier shows the edges of the area (and of a region you drag), so even a 16 × 16 area can be placed to the pixel
-- A list shows the sizes: pick one with 1 to 9 (also on the number pad), or go through them with Page Up and Page Down
-- The sizes of your last region captures are in the list too, so you can capture the same size again
+- A list shows the sizes: pick one with 1 to 9 and 0 (also on the number pad), or go through them with Page Up and Page Down
+- Press S to type a width and height for the area
+- The sizes of your last region and window captures are in the list too, with where they were: picking one puts the area at the same place again, on the screen or in the window of the same program, wherever that window is now
+- Your own sizes can have a place too, on a screen or in the window of a program; the Capture tab sets what your captures remember and whether the mouse moves there, and keeps a recent capture as one of your own sizes
 - Add and remove your own sizes in the settings, on the Capture tab
 - A preview in a corner shows what will be captured, enlarged when it is small and reduced when it is large; this works for regions and windows too. Press P to move it next to the mouse in place of the magnifier, and again to turn it off
 
@@ -97,6 +124,7 @@ Continuous builds are automatically created for every commit to the `main` branc
 - Screenshots use the modern Windows Graphics Capture, one monitor at a time, which works better with modern Windows applications
 - HDR screens are supported: bright parts of HDR games and videos keep their color and detail, like with the Xbox Game Bar
 - Screenshots without HDR content keep their colors exactly as on the screen, also on HDR screens
+- HDR captures: on an HDR display Greenshot can save the bright highlights as a JPEG XR file, also after editing. Switch it on in Settings > Capture.
 - By @Lakritzator
 
 **Improved Cursor Capture** (#863)
@@ -174,6 +202,19 @@ Continuous builds are automatically created for every commit to the `main` branc
 - Avoid quality parameter for PNG in file format handler
 - Ensures lossless PNG exports
 - By @danrhodes
+
+**Smaller PNG files**
+- PNG files, uploads, attachments and the clipboard are written as small as possible without losing anything, like optipng does
+- Images with few colors get much smaller
+- Greenshot now writes PNG, JPEG, BMP, GIF and WebP files with ImageSharp for everyone, not only for beta testers
+- For problems, greenshot.ini has OutputFilePngCompressionLevel (default 9) and ClipboardPngCompressionLevel (default 8) to save faster, and OutputFilePngPalette to turn off PNG files with a palette
+- The unused settings OptimizePNGCommand and OptimizePNGCommandArguments were removed, the External Command recipe step can still run any tool
+
+**Open image from file lists every format**
+- The dialog now also offers JPEG XR (.jxr, .hdp, .wdp, .wmp), DDS, EMF and WMF, the formats of the Windows image decoders on the PC (like HEIF, Camera RAW or JPEG XL), and "All files"
+- Images open faster and use less memory, Windows reads them; photos are turned upright by their EXIF orientation again
+- Codecs installed in Windows (e.g. HEIF, RAW or JPEG XL from the Microsoft Store) are used automatically, see [image formats](../vNext/image-formats.md)
+- JPEG, BMP, GIF and TIFF files are saved by Windows: JPEG much faster, TIFF compressed (LZW)
 
 **DIB Format** (#813)
 - Fixed GCHandle memory leak in DibFileFormatHandler
@@ -276,6 +317,22 @@ Continuous builds are automatically created for every commit to the `main` branc
 - By @Copilot
 
 #### ⚙️ Configuration & Settings
+
+**One way to write variables** (#1693)
+- The screenshot folder, file name, print footer, Outlook subject, external commands and recipes all use the same `${...}` values, e.g. `${payload.time:yyyy-MM-dd}`, `${payload.title}`, `${user.pictures}`; see [variables](../vNext/variables.md)
+- The settings show what a file name or folder gives and what is wrong with it while you type
+- New counters: per folder (`${counter.folder}`), per name and per key; a counter only goes up when a file was saved
+- A window title or other text of a capture can no longer choose the folder or the program of an external command
+- The settings of 1.3 are converted once and kept, so going back to 1.3 still works
+
+**Clicking the tray icon** (#1708)
+- Settings > General has a new "Tray icon" group: choose what a click and a double-click on the Greenshot icon next to the clock do
+- Both start a recipe, e.g. a region capture, opening the folder of the last capture, the settings or the tray menu; the list has every recipe which needs nothing given to it
+- A double-click opens the folder of the last capture again, as in 1.3 (it showed the tray menu in earlier 1.4 builds)
+- The entries of the tray menu (captures, open file, open last capture location) are recipes now, so they can get a hotkey or be changed in the recipe editor
+
+**When the file already exists**
+- greenshot.ini has OutputFileIfExists: Overwrite (the default), Ask (the save dialog, which now suggests the next free name) or AddNumber ("name (2).png", "name (3).png", ...). It replaces OutputFileAllowOverwrite; False there becomes Ask.
 
 **Switching plugins and destinations on or off**
 - Plugins and destinations can be switched on or off in the settings, without typing their names into greenshot.ini

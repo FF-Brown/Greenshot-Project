@@ -12,7 +12,7 @@
 
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -24,63 +24,31 @@ using Greenshot.Base.Threading;
 namespace Greenshot.Editor.Controls.Emoji;
 
 /// <summary>
-/// The event which is created when the emoji is picked
+/// The emoji picker, its data and the pick are in <see cref="EmojiPickerViewModel"/>
 /// </summary>
-public class EmojiPickedEventArgs : EventArgs
+public partial class EmojiPicker : UserControl
 {
-    public EmojiPickedEventArgs() { }
-    public EmojiPickedEventArgs(string emoji) => Emoji = emoji;
+    /// <summary>
+    /// The width of an emoji button
+    /// </summary>
+    private const double CellWidth = 40;
 
-    public string Emoji;
-}
-
-public delegate void EmojiPickedEventHandler(object sender, EmojiPickedEventArgs e);
-
-/// <summary>
-/// Interaction logic for Picker.xaml
-/// </summary>
-public partial class EmojiPicker : StackPanel
-{
     public EmojiPicker()
     {
         InitializeComponent();
     }
 
-    public IList<Emojis.Group> EmojiGroups => EmojiData.Data.Groups;
-
-    // Backwards compatibility for when the backend was a TextBlock.
-    public double FontSize
-    {
-        get => Image.Height * 0.75;
-        set => Image.Height = value / 0.75;
-    }
-
-    public event PropertyChangedEventHandler SelectionChanged;
-
-    public event EmojiPickedEventHandler Picked;
+    private EmojiPickerViewModel ViewModel => DataContext as EmojiPickerViewModel;
 
     /// <summary>
-    /// The popup with the emoji closed, after a pick, Esc or a click somewhere else
+    /// As many emoji in a row as fit, the vertical scroll bar takes some room
     /// </summary>
-    public event EventHandler Closed;
-
-    private static void OnSelectionPropertyChanged(DependencyObject source, DependencyPropertyChangedEventArgs e)
+    private void OnSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        (source as EmojiPicker)?.OnSelectionChanged(e.NewValue as string);
-    }
-
-    public string Selection
-    {
-        get => (string)GetValue(SelectionProperty);
-        set => SetValue(SelectionProperty, value);
-    }
-
-    private void OnSelectionChanged(string s)
-    {
-        var isDisabled = string.IsNullOrEmpty(s);
-        Image.Emoji = isDisabled ? "???" : s;
-        Image.Opacity = isDisabled ? 0.3 : 1.0;
-        SelectionChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Selection)));
+        if (ViewModel is { } viewModel && e.WidthChanged)
+        {
+            viewModel.Columns = Math.Max(4, (int)((ActualWidth - SystemParameters.VerticalScrollBarWidth - 4) / CellWidth));
+        }
     }
 
     private void OnEmojiPicked(object sender, RoutedEventArgs e)
@@ -90,74 +58,49 @@ public partial class EmojiPicker : StackPanel
             return;
         }
 
+        e.Handled = true;
         // An emoji with variations opens them first, the buttons in that popup pick
         if (emoji.HasVariations && FindChild<Popup>((DependencyObject)sender) is { } variations)
         {
             variations.IsOpen = true;
-            e.Handled = true;
             return;
         }
 
-        Selection = emoji.Text;
-        Button_INTERNAL.IsChecked = false;
-        e.Handled = true;
-        Picked?.Invoke(this, new EmojiPickedEventArgs(Selection));
-    }
-
-    public static readonly DependencyProperty SelectionProperty = DependencyProperty.Register(
-        nameof(Selection), typeof(string), typeof(EmojiPicker),
-        new FrameworkPropertyMetadata("☺", OnSelectionPropertyChanged));
-
-    private void OnPopupKeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Escape || sender is not Popup popup) return;
-        popup.IsOpen = false;
-        e.Handled = true;
-    }
-
-    private bool _popupInitialized;
-    private IInputElement _oldFocus;
-
-    private void OnPopupLoaded(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Popup popup) return;
-
-        // Only subscribe event handlers once to prevent accumulating lambda subscriptions
-        if (_popupInitialized) return;
-        _popupInitialized = true;
-
-        var child = popup.Child;
-        child.Focusable = true;
-        child.IsVisibleChanged += OnPopupChildVisibilityChanged;
-        popup.Closed += OnPopupClosed;
-    }
-
-    private void OnPopupChildVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
-    {
-        if (sender is not UIElement child || !child.IsVisible) return;
-        _oldFocus = Keyboard.FocusedElement;
-
-        // Start on the tab of the category, Tab goes on to its emoji.
-        // The tabs exist only after the popup's first layout, which must not be forced while the popup is still opening.
-        Dispatcher.InvokeAsync(() =>
+        // The variation popup closes after a pick
+        if (FindParent<Popup>((DependencyObject)sender) is { } popup)
         {
-            var tabs = FindChild<TabControl>(child);
-            if (tabs?.ItemContainerGenerator.ContainerFromIndex(Math.Max(0, tabs.SelectedIndex)) is TabItem tab)
-            {
-                tab.Focus();
-            }
-            else
-            {
-                Keyboard.Focus(child);
-            }
-        }, DispatcherPriority.Loaded).Task.FireAndLog("Focus the emoji category");
+            popup.IsOpen = false;
+        }
+
+        bool fromKeyboard = InputManager.Current.MostRecentInputDevice is KeyboardDevice;
+        ViewModel?.Pick(emoji.Text, fromKeyboard);
     }
 
-    private void OnPopupClosed(object sender, EventArgs e)
+    /// <summary>
+    /// Enter in the search picks the first emoji found, the down arrow goes to the found emoji
+    /// </summary>
+    private void OnSearchKeyDown(object sender, KeyEventArgs e)
     {
-        Keyboard.Focus(_oldFocus);
-        Closed?.Invoke(this, EventArgs.Empty);
+        var viewModel = ViewModel;
+        if (viewModel == null || !viewModel.IsSearching)
+        {
+            return;
+        }
+
+        if (e.Key == Key.Enter && viewModel.SearchRows.FirstOrDefault()?.FirstOrDefault() is { } first)
+        {
+            viewModel.Pick(first.Text, fromKeyboard: true);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Down && FindVisibleEmojiButton() is { } button)
+        {
+            button.Focus();
+            e.Handled = true;
+        }
     }
+
+    private ButtonBase FindVisibleEmojiButton()
+        => FindChildren<ListView>(this).Where(list => list.IsVisible).Select(FindChild<ButtonBase>).FirstOrDefault(button => button != null);
 
     /// <summary>
     /// The arrow keys move between the emoji of a category, Home and End go to the start and end of the row.
@@ -212,6 +155,12 @@ public partial class EmojiPicker : StackPanel
         e.Handled = true;
         if (target < 0 || target >= total || target == index)
         {
+            // Up from the first row of the search results goes back to the search field
+            if (target < 0 && e.Key == Key.Up && ViewModel?.IsSearching == true)
+            {
+                SearchBox.Focus();
+            }
+
             return;
         }
 
@@ -247,6 +196,13 @@ public partial class EmojiPicker : StackPanel
             _ => (FocusNavigationDirection?)null
         };
 
+        if (e.Key == Key.Escape && FindParent<Popup>((DependencyObject)sender) is { } popup)
+        {
+            popup.IsOpen = false;
+            e.Handled = true;
+            return;
+        }
+
         if (direction == null || Keyboard.Modifiers != ModifierKeys.None || e.OriginalSource is not UIElement focused)
         {
             return;
@@ -257,32 +213,47 @@ public partial class EmojiPicker : StackPanel
     }
 
     private static T FindChild<T>(DependencyObject parent) where T : DependencyObject
+        => FindChildren<T>(parent).FirstOrDefault();
+
+    private static IEnumerable<T> FindChildren<T>(DependencyObject parent) where T : DependencyObject
     {
         for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
         {
             var child = VisualTreeHelper.GetChild(parent, i);
             if (child is T found)
             {
+                yield return found;
+                continue;
+            }
+
+            foreach (var deeper in FindChildren<T>(child))
+            {
+                yield return deeper;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The popup of a button inside a popup: the popup's content has no visual parent, its logical parent is the popup
+    /// </summary>
+    private static T FindParent<T>(DependencyObject child) where T : DependencyObject
+    {
+        for (var current = child; current != null;)
+        {
+            if (current is T found)
+            {
                 return found;
             }
 
-            if (FindChild<T>(child) is { } deeper)
+            var logical = LogicalTreeHelper.GetParent(current);
+            if (logical is T logicalFound)
             {
-                return deeper;
+                return logicalFound;
             }
+
+            current = (current is Visual ? VisualTreeHelper.GetParent(current) : null) ?? logical;
         }
 
         return null;
-    }
-
-    public void ShowPopup(bool show)
-    {
-        foreach (var child in Children)
-        {
-            if (child is ToggleButton button)
-            {
-                button.IsChecked = show;
-            }
-        }
     }
 }

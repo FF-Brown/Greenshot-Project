@@ -23,6 +23,10 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
+using Greenshot.Base.Expressions;
+using Greenshot.Base.Recipes.Expressions;
+using Greenshot.Base.Recipes.Pipeline;
 
 namespace Greenshot.Base.Recipes.Triggers
 {
@@ -42,6 +46,7 @@ namespace Greenshot.Base.Recipes.Triggers
         public const string TypeOpenFile = "OpenFile";
         public const string TypeExtension = "Extension";
         public const string TypeAiTool = "AiTool";
+        public const string TypeNotification = "Notification";
 
         /// <summary>
         /// The type of trigger (e.g. "Hotkey", "ContextMenu", "Clipboard", "Manual").
@@ -77,6 +82,13 @@ namespace Greenshot.Base.Recipes.Triggers
         /// </summary>
         [JsonIgnore]
         public bool IsBrowserInvocationApproved { get; set; } = true;
+
+        /// <summary>
+        /// An expression which decides whether the trigger is registered, e.g. "${config.Core.CaptureWindowsInteractive}";
+        /// checked when the triggers are registered (start, settings or option changed), not when the trigger fires.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string When { get; set; }
 
         /// <summary>
         /// Trigger-specific parameters (e.g. Hotkey, MenuItemText, Group, Order).
@@ -130,6 +142,58 @@ namespace Greenshot.Base.Recipes.Triggers
             }
         }
 
+        /// <summary>
+        /// The parameter of a Hotkey trigger which holds the hotkey: a hotkey, "${option.key}" for the value of a
+        /// Hotkey option, which the user sets in Settings > Recipes without changing the recipe file, or
+        /// "${config.Core.Name}" for a hotkey of the general settings (e.g. "${config.Core.RegionHotkey}" of the built-in recipes).
+        /// </summary>
+        public const string HotkeyParameter = "Hotkey";
+
+        private static readonly Regex ConfigReferencePattern = new Regex(@"^\$\{\s*config\.Core\.([A-Za-z][A-Za-z0-9_]*)\s*\}$", RegexOptions.Compiled);
+
+        /// <summary>
+        /// The name of the setting when the whole text is one setting of the general settings, "${config.Core.Name}"
+        /// </summary>
+        public static bool TryParseConfigReference(string text, out string settingName)
+        {
+            settingName = null;
+            var match = string.IsNullOrEmpty(text) ? null : ConfigReferencePattern.Match(text.Trim());
+            if (match == null || !match.Success) return false;
+            settingName = match.Groups[1].Value;
+            return true;
+        }
+
+        /// <summary>
+        /// The hotkey of a Hotkey trigger of the recipe: the value of the option or setting it names, or the hotkey in the file.
+        /// Empty when there is none (e.g. the user removed the hotkey).
+        /// </summary>
+        public string GetHotkey(CaptureRecipe recipe)
+        {
+            string hotkey = GetParameter<string>(HotkeyParameter);
+            if (RecipeOptionStore.TryParseReference(hotkey, out var optionKey))
+            {
+                hotkey = RecipeOptionStore.TryResolve(recipe, optionKey, out var owner, out var option) && option.Type == Contracts.ContractDataType.Hotkey
+                    ? RecipeOptionStore.GetValue(owner, option) as string
+                    : null;
+            }
+            else if (TryParseConfigReference(hotkey, out var settingName))
+            {
+                hotkey = VariableResolver.Instance.Evaluate("${config.Core." + settingName + "}", VariableScope.Empty) as string;
+            }
+
+            return string.IsNullOrWhiteSpace(hotkey) || string.Equals(hotkey.Trim(), "None", StringComparison.OrdinalIgnoreCase) ? string.Empty : hotkey;
+        }
+
+        /// <summary>
+        /// Whether the trigger is registered for the recipe: enabled, approved and its <see cref="When"/> is true
+        /// </summary>
+        public bool IsWanted(CaptureRecipe recipe)
+        {
+            if (!IsActive) return false;
+            if (string.IsNullOrWhiteSpace(When) || recipe == null) return true;
+            return RecipeExpressions.IsMet(When, new CaptureFlowContext(recipe));
+        }
+
         public TriggerConfig SetParameter(string key, object value)
         {
             if (Parameters == null)
@@ -147,6 +211,7 @@ namespace Greenshot.Base.Recipes.Triggers
                 TriggerType = TriggerType,
                 Name = Name,
                 Enabled = Enabled,
+                When = When,
                 IsApproved = IsApproved,
                 IsBrowserInvocationApproved = IsBrowserInvocationApproved,
                 Parameters = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
@@ -179,6 +244,50 @@ namespace Greenshot.Base.Recipes.Triggers
             }
             config.SetParameter("Group", group ?? "Recipes");
             config.SetParameter("Order", order);
+            return config;
+        }
+
+        /// <summary>
+        /// The group of a ContextMenu trigger whose item is in the tray menu itself, not in its Recipes menu
+        /// </summary>
+        public const string MainMenuGroup = "Main";
+
+        /// <summary>
+        /// The parameter of a ContextMenu trigger with the icon of its item: the name of one of the icons of the tray menu,
+        /// e.g. "contextmenu_capturearea.Image"
+        /// </summary>
+        public const string IconParameter = "Icon";
+
+        /// <summary>
+        /// The parameter of a ContextMenu trigger which turns its item into a sub menu: <see cref="ExpandDisplays"/> or <see cref="ExpandWindows"/>
+        /// </summary>
+        public const string ExpandParameter = "Expand";
+
+        /// <summary>
+        /// A sub menu with "All" and each display; a display passes its bounds to the recipe as PreSuppliedRegion
+        /// </summary>
+        public const string ExpandDisplays = "Displays";
+
+        /// <summary>
+        /// A sub menu with the open windows; a window is passed to the recipe as TargetWindow
+        /// </summary>
+        public const string ExpandWindows = "Windows";
+
+        /// <summary>
+        /// A ContextMenu trigger for an item in the tray menu itself, ordered by <paramref name="order"/>: a separator is
+        /// shown between items whose order is in another hundred (e.g. 40 and 110), the Recipes menu has order 200.
+        /// </summary>
+        public static TriggerConfig CreateMainMenu(string menuItemText, int order, string icon = null, string expand = null)
+        {
+            var config = CreateContextMenu(menuItemText, MainMenuGroup, order);
+            if (!string.IsNullOrEmpty(icon))
+            {
+                config.SetParameter(IconParameter, icon);
+            }
+            if (!string.IsNullOrEmpty(expand))
+            {
+                config.SetParameter(ExpandParameter, expand);
+            }
             return config;
         }
 
@@ -244,6 +353,11 @@ namespace Greenshot.Base.Recipes.Triggers
             config.SetParameter("FireAndForget", fireAndForget);
             return config;
         }
+
+        /// <summary>
+        /// Runs the recipe for the capture of a clicked Greenshot notification, the capture is handed over
+        /// </summary>
+        public static TriggerConfig CreateNotification(string name = null) => new TriggerConfig(TypeNotification, name ?? "Clicked notification");
 
         public static TriggerConfig CreateExtension(string browser = null, bool fireAndForget = false, string name = null)
         {

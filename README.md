@@ -58,7 +58,7 @@ IDE System Requirements:
 
 * Windows OS environment
 * Visual Studio 2026 (the native projects use the v145 C++ toolset), with the **Desktop development with C++** workload, MSVC v145 x64/x86 build tools, and a Windows 10 SDK
-* .NET SDK 10.0.100 or newer (Greenshot.Mcp targets .NET 10)
+* .NET SDK 10.0.114 or newer (Greenshot.Mcp targets .NET 10; older SDKs carry an ILCompiler with the Brotli vulnerability GHSA-p3jp-9v83-76w9)
 * .NET Framework 4.8 Developer Pack / targeting pack
 
 Build Instructions:
@@ -119,7 +119,7 @@ Known vulnerability warnings:
 This is for Greenshot 1.4.x, Greenshot 1.3 doesn't use ImageSharp!
 Some NuGet audit warnings are suppressed with `NuGetAuditSuppress` in `src\Directory.Build.props`, because they don't apply to Greenshot or are worked around. The reasons are listed here. Remove the suppression when the package is updated.
 
-**SixLabors.ImageSharp 2.1.13.** These advisories are fixed only in 4.1.2, which no longer supports .NET Framework, and there is no 2.1.x fix. Greenshot only loads and saves files with ImageSharp when "beta tester" is on (`ImageSharpFileFormatHandler`); otherwise System.Drawing is used.
+**SixLabors.ImageSharp 2.1.13.** These advisories are fixed only in 4.1.2, which no longer supports .NET Framework, and there is no 2.1.x fix. Greenshot saves PNG, WebP, TGA and PBM files with ImageSharp (`ImageSharpFileFormatHandler`, PNG is written by `PngOptimizer`); JPEG, BMP, GIF and TIFF are saved with the Windows Imaging Component (`WicFileFormatHandler`), ImageSharp saves them only when WIC fails. Images are loaded with the Windows Imaging Component (`WicFileFormatHandler`); ImageSharp loads only what WIC can't on that PC: TGA, PBM, and WebP when the Store codec isn't installed, or an image WIC fails to read (never TIFF).
 
 | Advisory | Severity | What it is | Why Greenshot is not affected |
 |---|---|---|---|

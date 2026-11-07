@@ -247,6 +247,11 @@ namespace Greenshot.Plugin.RecipeEditor
         string StepSetVariable { get; }
 
         /// <summary>
+        /// Set Metadata
+        /// </summary>
+        string StepSetMetadata { get; }
+
+        /// <summary>
         /// FLOW &amp; FEEDBACK
         /// </summary>
         string HeaderFlowFeedback { get; }
@@ -290,6 +295,16 @@ namespace Greenshot.Plugin.RecipeEditor
         /// Standard Error / Exit Code (CLI)
         /// </summary>
         string StepStderr { get; }
+
+        /// <summary>
+        /// Show in Explorer
+        /// </summary>
+        string StepShowInExplorer { get; }
+
+        /// <summary>
+        /// Open window
+        /// </summary>
+        string StepOpenWindow { get; }
 
         /// <summary>
         /// OUTPUT &amp; DESTINATIONS
@@ -475,6 +490,26 @@ namespace Greenshot.Plugin.RecipeEditor
         /// Display Name / Label
         /// </summary>
         string DisplayName { get; }
+
+        /// <summary>
+        /// Run this step
+        /// </summary>
+        string StepEnabled { get; }
+
+        /// <summary>
+        /// When off, the recipe skips this step and goes on with the next ones
+        /// </summary>
+        string TipStepEnabled { get; }
+
+        /// <summary>
+        /// Only when
+        /// </summary>
+        string StepWhen { get; }
+
+        /// <summary>
+        /// Runs the step only when this expression is true, e.g. ${option.add_border}. Empty: always
+        /// </summary>
+        string TipStepWhen { get; }
 
         /// <summary>
         /// STEP PARAMETERS
@@ -1112,9 +1147,64 @@ namespace Greenshot.Plugin.RecipeEditor
         string DeleteVariable { get; }
 
         /// <summary>
-        /// Available scopes: ${user.username}, ${machine.computername}, ${now:yyyy-MM-dd}, ${payload.width}
+        /// Available scopes: ${user.name}, ${machine.name}, ${time.now:yyyy-MM-dd}, ${payload.width}
         /// </summary>
         string HintVariableScopes { get; }
+
+        /// <summary>
+        /// Choose the details here, not those of the settings
+        /// </summary>
+        string MetadataOwnFields { get; }
+
+        /// <summary>
+        /// Capture time
+        /// </summary>
+        string MetadataCaptureTime { get; }
+
+        /// <summary>
+        /// Author and copyright of the settings
+        /// </summary>
+        string MetadataAuthorField { get; }
+
+        /// <summary>
+        /// Window title and web address
+        /// </summary>
+        string MetadataSource { get; }
+
+        /// <summary>
+        /// Text in the capture (OCR)
+        /// </summary>
+        string MetadataText { get; }
+
+        /// <summary>
+        /// Barcodes and QR codes
+        /// </summary>
+        string MetadataBarcodes { get; }
+
+        /// <summary>
+        /// Title
+        /// </summary>
+        string MetadataTitle { get; }
+
+        /// <summary>
+        /// Description
+        /// </summary>
+        string MetadataDescription { get; }
+
+        /// <summary>
+        /// Author
+        /// </summary>
+        string MetadataAuthor { get; }
+
+        /// <summary>
+        /// Copyright
+        /// </summary>
+        string MetadataCopyright { get; }
+
+        /// <summary>
+        /// Title and description may use variables like ${payload.title}. An empty box keeps what the settings write. The title, description, window title, web address, text and barcodes are private: files on this computer get them, before the image leaves it you are asked.
+        /// </summary>
+        string HintMetadata { get; }
 
         /// <summary>
         /// Annotations
@@ -1722,6 +1812,41 @@ namespace Greenshot.Plugin.RecipeEditor
         string StderrText { get; }
 
         /// <summary>
+        /// File or folder to show (supports ${...}, empty: the last capture)
+        /// </summary>
+        string ShowInExplorerPath { get; }
+
+        /// <summary>
+        /// Window to open
+        /// </summary>
+        string OpenWindowWindow { get; }
+
+        /// <summary>
+        /// Tray menu
+        /// </summary>
+        string OpenWindowTrayMenu { get; }
+
+        /// <summary>
+        /// Settings
+        /// </summary>
+        string OpenWindowSettings { get; }
+
+        /// <summary>
+        /// About Greenshot
+        /// </summary>
+        string OpenWindowAbout { get; }
+
+        /// <summary>
+        /// Help
+        /// </summary>
+        string OpenWindowHelp { get; }
+
+        /// <summary>
+        /// Empty image in the editor
+        /// </summary>
+        string OpenWindowEmptyEditor { get; }
+
+        /// <summary>
         /// Exit Code
         /// </summary>
         string ExitCode { get; }
@@ -1752,19 +1877,24 @@ namespace Greenshot.Plugin.RecipeEditor
         string ImageFormat { get; }
 
         /// <summary>
-        /// Allow Overwrite
+        /// If the File Exists
         /// </summary>
-        string AllowOverwrite { get; }
+        string IfFileExists { get; }
 
         /// <summary>
-        /// Enabled (Overwrite existing)
+        /// Overwrite it
         /// </summary>
-        string OverwriteEnabled { get; }
+        string IfFileExistsOverwrite { get; }
 
         /// <summary>
-        /// Disabled (Auto-number files)
+        /// Ask where to save (unattended: add a number)
         /// </summary>
-        string OverwriteDisabled { get; }
+        string IfFileExistsAsk { get; }
+
+        /// <summary>
+        /// Add a number: name (2)
+        /// </summary>
+        string IfFileExistsAddNumber { get; }
 
         /// <summary>
         /// Quality Prompt
@@ -1790,6 +1920,66 @@ namespace Greenshot.Plugin.RecipeEditor
         /// Enabled (Copy filepath)
         /// </summary>
         string CopyPathEnabled { get; }
+
+        /// <summary>
+        /// Ask Where to Save
+        /// </summary>
+        string AskForFilename { get; }
+
+        /// <summary>
+        /// No, save to the output folder
+        /// </summary>
+        string AskForFilenameNo { get; }
+
+        /// <summary>
+        /// Yes, with the save dialog
+        /// </summary>
+        string AskForFilenameYes { get; }
+
+        /// <summary>
+        /// HDR File
+        /// </summary>
+        string HdrFile { get; }
+
+        /// <summary>
+        /// JPEG XR (lossless, with the highlights)
+        /// </summary>
+        string HdrFileJxr { get; }
+
+        /// <summary>
+        /// Saves an HDR file when the Source step captures HDR (Hdr) and nothing was drawn on the capture, otherwise the normal file
+        /// </summary>
+        string TipHdrFile { get; }
+
+        /// <summary>
+        /// Select on
+        /// </summary>
+        string ScreenMode { get; }
+
+        /// <summary>
+        /// Live screen
+        /// </summary>
+        string ScreenModeLive { get; }
+
+        /// <summary>
+        /// Frozen screen
+        /// </summary>
+        string ScreenModeFrozen { get; }
+
+        /// <summary>
+        /// HDR Content
+        /// </summary>
+        string CaptureHdr { get; }
+
+        /// <summary>
+        /// Keep (of HDR displays)
+        /// </summary>
+        string CaptureHdrEnabled { get; }
+
+        /// <summary>
+        /// Captures the HDR content of HDR displays as well, for steps which use it (e.g. the HDR file of Save to File). Clearer on the live screen.
+        /// </summary>
+        string TipCaptureHdr { get; }
 
         /// <summary>
         /// JPEG Quality (1-100 or empty=Config)
@@ -1905,6 +2095,21 @@ namespace Greenshot.Plugin.RecipeEditor
         /// Current editor
         /// </summary>
         string EditorCurrent { get; }
+
+        /// <summary>
+        /// Import mode of the editor destination
+        /// </summary>
+        string EditorImportMode { get; }
+
+        /// <summary>
+        /// Surface: the capture becomes the surface (current editor) or opens as a tab (available editor)
+        /// </summary>
+        string EditorImportModeSurface { get; }
+
+        /// <summary>
+        /// Image container: the capture is added as image, the surface stays
+        /// </summary>
+        string EditorImportModeImageContainer { get; }
 
         /// <summary>
         /// Printer Name (empty = Default Printer)
@@ -2040,11 +2245,6 @@ namespace Greenshot.Plugin.RecipeEditor
         /// Show capture thumbnail preview
         /// </summary>
         string ShowThumbnail { get; }
-
-        /// <summary>
-        /// Allow forwarding capture to other recipes
-        /// </summary>
-        string AllowForwarding { get; }
 
         /// <summary>
         /// Auto-Dismiss Timeout (Seconds, 0 = Disabled)
@@ -2322,6 +2522,31 @@ namespace Greenshot.Plugin.RecipeEditor
         string HintOptions { get; }
 
         /// <summary>
+        /// TRANSLATIONS
+        /// </summary>
+        string HeaderTranslations { get; }
+
+        /// <summary>
+        /// Translate the texts of this recipe into other languages. ...
+        /// </summary>
+        string HintTranslations { get; }
+
+        /// <summary>
+        /// Add a language
+        /// </summary>
+        string AddTranslationLanguage { get; }
+
+        /// <summary>
+        /// Translations shown below
+        /// </summary>
+        string TranslationLanguageShown { get; }
+
+        /// <summary>
+        /// Remove this language and its texts
+        /// </summary>
+        string TipRemoveLanguage { get; }
+
+        /// <summary>
         /// Key
         /// </summary>
         string OptionKey { get; }
@@ -2382,7 +2607,7 @@ namespace Greenshot.Plugin.RecipeEditor
         string OptionExpandPlaceholders { get; }
 
         /// <summary>
-        /// Text options only: placeholders in the value the user sets are filled in when the step runs, e.g. a caption "Captured ${now:yyyy-MM-dd}" gets the date. Without it the value is used as typed.
+        /// Text options only: placeholders in the value the user sets are filled in when the step runs, e.g. a caption "Captured ${time.now:yyyy-MM-dd}" gets the date. Without it the value is used as typed.
         /// </summary>
         string TipOptionExpandPlaceholders { get; }
 
@@ -2460,6 +2685,16 @@ namespace Greenshot.Plugin.RecipeEditor
         /// Add Browser Extension Trigger
         /// </summary>
         string TipTriggerAddBrowserExtension { get; }
+
+        /// <summary>
+        /// + Clicked notification
+        /// </summary>
+        string TriggerAddNotification { get; }
+
+        /// <summary>
+        /// Run this recipe for the capture of a clicked Greenshot notification
+        /// </summary>
+        string TipTriggerAddNotification { get; }
 
         /// <summary>
         /// + AI Tool
@@ -3077,6 +3312,11 @@ namespace Greenshot.Plugin.RecipeEditor
         string TriggerBrowserExtension { get; }
 
         /// <summary>
+        /// Clicked notification
+        /// </summary>
+        string TriggerNotification { get; }
+
+        /// <summary>
         /// Schedule
         /// </summary>
         string TriggerSchedule { get; }
@@ -3310,6 +3550,26 @@ namespace Greenshot.Plugin.RecipeEditor
         /// Hotkey: {0}
         /// </summary>
         string TriggerTitleHotkey { get; }
+
+        /// <summary>
+        /// {0} (from the general settings)
+        /// </summary>
+        string TriggerHotkeyFromSettings { get; }
+
+        /// <summary>
+        /// {0} (from the option "{1}")
+        /// </summary>
+        string TriggerHotkeyFromOption { get; }
+
+        /// <summary>
+        /// Use a fixed hotkey
+        /// </summary>
+        string TriggerHotkeyUseFixed { get; }
+
+        /// <summary>
+        /// Use the hotkey of an option
+        /// </summary>
+        string TriggerHotkeyUseOption { get; }
 
         /// <summary>
         /// Context Menu: {0}
@@ -4247,6 +4507,16 @@ namespace Greenshot.Plugin.RecipeEditor
         string SummaryVariablesNone { get; }
 
         /// <summary>
+        /// Details of the settings
+        /// </summary>
+        string SummaryMetadataSettings { get; }
+
+        /// <summary>
+        /// Details: {0}
+        /// </summary>
+        string SummaryMetadata { get; }
+
+        /// <summary>
         /// Sound: Enabled
         /// </summary>
         string SummarySoundEnabled { get; }
@@ -4362,6 +4632,21 @@ namespace Greenshot.Plugin.RecipeEditor
         string SummaryStderr { get; }
 
         /// <summary>
+        /// Show in Explorer: {0}
+        /// </summary>
+        string SummaryShowInExplorer { get; }
+
+        /// <summary>
+        /// Show the last capture in the Explorer
+        /// </summary>
+        string SummaryShowInExplorerLast { get; }
+
+        /// <summary>
+        /// Open: {0}
+        /// </summary>
+        string SummaryOpenWindow { get; }
+
+        /// <summary>
         /// Stderr (exit {0}, abort): {1}
         /// </summary>
         string SummaryStderrAbort { get; }
@@ -4440,5 +4725,30 @@ namespace Greenshot.Plugin.RecipeEditor
         /// Upload to Dropbox
         /// </summary>
         string SummaryDropbox { get; }
+
+        /// <summary>
+        /// Get More Recipes
+        /// </summary>
+        string ManagerBtnGetMore { get; }
+
+        /// <summary>
+        /// Opens the recipe catalog on getgreenshot.org, install a recipe there with its Install button
+        /// </summary>
+        string ManagerBtnGetMoreTooltip { get; }
+
+        /// <summary>
+        /// ${ } Variables
+        /// </summary>
+        string ExpressionHelpButton { get; }
+
+        /// <summary>
+        /// Lists the variables and functions this recipe can use (F1)
+        /// </summary>
+        string TipExpressionHelp { get; }
+
+
+
+
+
     }
 }

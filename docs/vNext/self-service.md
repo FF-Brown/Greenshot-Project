@@ -77,7 +77,7 @@ The badge counts the problems: an outdated version, a hidden icon, the Snipping 
 ### Files & Configuration
 
 - **Screenshot Folder (where Greenshot saves)**: the folder from the settings, the folder that is really used (with
-  variables like `${YYYY}` filled in), and the name the next file gets, e.g. with the filename pattern. Below that the
+  variables like `${payload.time:yyyy}` filled in), and the name the next file gets, e.g. with the filename pattern. Below that the
   checks, each with ✓, ⚠️ or ❌:
 
   | Check | What it means |
@@ -136,8 +136,8 @@ meanwhile.
 
 For "Print does nothing" or "Print opens something else".
 
-- **Greenshot Configured Shortcuts**: the five capture hotkeys from the settings (region, window, full screen, last region,
-  clipboard) and their status: *Registered* when Greenshot listens for the hotkey, *Not Registered / Conflict* when it
+- **Greenshot Configured Shortcuts**: the hotkeys of all recipes which are on (the capture hotkeys of the settings first,
+  then the hotkeys of other recipes) and their status: *Registered* when Greenshot listens for the hotkey, *Not Registered / Conflict* when it
   doesn't (e.g. a key name in `greenshot.ini` it can't read), *Disabled* when no hotkey is set. *Re-register Greenshot
   Hotkeys* registers them again, e.g. after you closed a program which had taken the keys.
 - **Microsoft OneDrive**: OneDrive can save screenshots itself (*Automatically save screenshots I capture to OneDrive*) and

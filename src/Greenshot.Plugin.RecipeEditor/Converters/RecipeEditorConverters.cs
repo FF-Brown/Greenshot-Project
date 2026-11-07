@@ -35,6 +35,7 @@ namespace Greenshot.Plugin.RecipeEditor.Converters
                 case "Annotation":
                     return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#8250df")); // Purple
                 case "SetVariable":
+                case "SetMetadata":
                     return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#0550ae")); // Dark Blue
                 case "ImmediateFeedback":
                     return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#2da44e")); // Green
@@ -51,6 +52,8 @@ namespace Greenshot.Plugin.RecipeEditor.Converters
                     return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#8250df")); // Purple
                 case "Notification":
                 case "Stdout":
+                case "ShowInExplorer":
+                case "OpenWindow":
                     return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#57606a")); // Gray
                 case "Stderr":
                     return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#cf222e")); // Red
@@ -102,6 +105,7 @@ namespace Greenshot.Plugin.RecipeEditor.Converters
                 case "TextEffect": return "🛡️";
                 case "Annotation": return "🎨";
                 case "SetVariable": return "💲";
+                case "SetMetadata": return "🏷️";
                 case "ImmediateFeedback": return "🔊";
                 case "Ocr": return "🔤";
                 case "Destinations": return "↗️";
@@ -114,6 +118,8 @@ namespace Greenshot.Plugin.RecipeEditor.Converters
                 case "CustomDestination": return "🔌";
                 case "Notification": return "🔔";
                 case "Stdout": return "📤";
+                case "ShowInExplorer": return "📂";
+                case "OpenWindow": return "🪟";
                 case "Stderr": return "⛔";
                 case "RecordVideo": return "🎥";
                 case "Conditional": return "🔀";

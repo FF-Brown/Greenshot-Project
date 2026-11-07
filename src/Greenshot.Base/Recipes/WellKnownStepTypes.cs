@@ -91,6 +91,11 @@ namespace Greenshot.Base.Recipes
         public const string SetVariable = "SetVariable";
 
         /// <summary>
+        /// Decides the details (EXIF/XMP) written into the image files of the following steps.
+        /// </summary>
+        public const string SetMetadata = "SetMetadata";
+
+        /// <summary>
         /// Dedicated step saving the capture to a file with customizable directory, pattern, and format.
         /// </summary>
         public const string SaveFile = "SaveFile";
@@ -144,6 +149,16 @@ namespace Greenshot.Base.Recipes
         /// A named place in a recipe where recipe extensions put their steps (see <see cref="RecipeSlots"/>); does nothing itself.
         /// </summary>
         public const string Slot = "Slot";
+
+        /// <summary>
+        /// Shows a file or folder in the Windows Explorer, by default the last capture; needs no image.
+        /// </summary>
+        public const string ShowInExplorer = "ShowInExplorer";
+
+        /// <summary>
+        /// Opens a window of Greenshot (tray menu, settings, about, help, empty editor); needs no image.
+        /// </summary>
+        public const string OpenWindow = "OpenWindow";
 
         private static readonly HashSet<string> DestinationStepTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {

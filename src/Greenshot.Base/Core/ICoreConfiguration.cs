@@ -67,7 +67,7 @@ namespace Greenshot.Base.Core
         bool WelcomeShown { get; set; }
 
         [DataMember(Name = "Destinations")]
-        [Description("Which destinations? Possible options (more might be added by plugins) are: Editor, FileDefault, FileWithDialog, Clipboard, Printer, EMail, Picker")]
+        [Description("Which destinations? Possible options (more might be added by plugins) are: Editor, FileDefault, FileWithDialog, Clipboard, Printer, EMail, Picker, DestinationWindow")]
         [DefaultValue("Picker")]
         List<string> OutputDestinations { get; set; }
 
@@ -75,9 +75,18 @@ namespace Greenshot.Base.Core
         [DefaultValue("PNG,DIB")]
         List<ClipboardFormat> ClipboardFormats { get; set; }
 
+        [Description("zlib compression level (1-9) for the PNG on the clipboard, it's made on every copy, so a lower level copies faster.")]
+        [DefaultValue(8)]
+        [Range(1, 9, ErrorMessage = "Clipboard PNG compression level must be between 1 and 9.")]
+        int ClipboardPngCompressionLevel { get; set; }
+
         [Description("Should the mouse be captured?")]
         [DefaultValue(true)]
         bool CaptureMousepointer { get; set; }
+
+        [Description("Keep the HDR content of HDR displays with a capture, for JPEG XR files (a Source step without Hdr follows this)")]
+        [DefaultValue(false)]
+        bool CaptureHdr { get; set; }
 
         [Description("Use interactive window selection to capture? (false=Capture active window)")]
         [DefaultValue(false)]
@@ -116,16 +125,26 @@ namespace Greenshot.Base.Core
         [DefaultValue(true)]
         bool ShowNotificationThumbnail { get; set; }
 
-        [Description("Output file path.")]
+        [Description("Output file path of Greenshot 1.3, only read once to fill OutputDirectory; kept for going back to 1.3.")]
         string OutputFilePath { get; set; }
 
-        [Description("If the target file already exists True will make Greenshot always overwrite and False will display a 'Save-As' dialog.")]
+        [Description("The folder for screenshots, a template like ${user.pictures}\\Greenshots or ${user.desktop}\\${payload.time:yyyy-MM}; see docs/vNext/variables.md.")]
+        string OutputDirectory { get; set; }
+
+        [Description("Replaced by OutputFileIfExists: False is changed there once to Ask, then this is True again.")]
         [DefaultValue(true)]
         bool OutputFileAllowOverwrite { get; set; }
 
-        [Description("Filename pattern for screenshot.")]
+        [Description("What happens if the file to save already exists: Overwrite, Ask (the save dialog; unattended the name gets a number) or AddNumber (\"name (2).png\").")]
+        [DefaultValue("Overwrite")]
+        FileExistsAction OutputFileIfExists { get; set; }
+
+        [Description("Filename pattern of Greenshot 1.3, only read once to fill OutputFileNameTemplate; kept for going back to 1.3.")]
         [DefaultValue("${capturetime:d\"yyyy-MM-dd HH_mm_ss\"}-${title}")]
         string OutputFileFilenamePattern { get; set; }
+
+        [Description("The file name of screenshots without extension, a template like ${payload.time:yyyy-MM-dd HH_mm_ss}-${payload.title}; may hold sub folders and counters (${counter.global}, ${counter.folder:000}); see docs/vNext/variables.md.")]
+        string OutputFileNameTemplate { get; set; }
 
         [Description("Default file type for writing screenshots.")]
         [DefaultValue(WellKnownFileFormats.Png)]
@@ -143,6 +162,15 @@ namespace Greenshot.Base.Core
         [DefaultValue(256)]
         int OutputFileReduceColorsTo { get; set; }
 
+        [Description("zlib compression level (1-9) for PNG files and uploads, 9 gives the smallest files but takes about 3 times as long as 6. PNG files are always lossless.")]
+        [DefaultValue(9)]
+        [Range(1, 9, ErrorMessage = "PNG compression level must be between 1 and 9.")]
+        int OutputFilePngCompressionLevel { get; set; }
+
+        [Description("Write a PNG with 256 colors or fewer with a palette, which is much smaller. Set to false if an application can't read these PNG files.")]
+        [DefaultValue(true)]
+        bool OutputFilePngPalette { get; set; }
+
         [Description("When saving a screenshot, copy the path to the clipboard?")]
         [DefaultValue(true)]
         bool OutputFileCopyPathToClipboard { get; set; }
@@ -159,7 +187,7 @@ namespace Greenshot.Base.Core
         [DefaultValue(false)]
         bool OutputFilePromptQuality { get; set; }
 
-        [Description("The number for the ${NUM} in the filename pattern, is increased automatically after each save.")]
+        [Description("The last number given out by ${counter.global} (${NUM} in 1.3), goes up after each saved or uploaded file which used it.")]
         [DefaultValue(1)]
         uint OutputFileIncrementingNumber { get; set; }
 
@@ -204,9 +232,12 @@ namespace Greenshot.Base.Core
         [DefaultValue(true)]
         bool OutputPrintFooter { get; set; }
 
-        [Description("Footer pattern")]
+        [Description("Footer pattern of Greenshot 1.3, only read once to fill OutputPrintFooterTemplate; kept for going back to 1.3.")]
         [DefaultValue("${capturetime:d\"D\"} ${capturetime:d\"T\"} - ${title}")]
         string OutputPrintFooterPattern { get; set; }
+
+        [Description("The footer of printouts, a template like ${payload.time:D} ${payload.time:T} - ${payload.title}; see docs/vNext/variables.md.")]
+        string OutputPrintFooterTemplate { get; set; }
 
         [Description("The wav-file to play when a capture is taken, loaded only once at the Greenshot startup")]
         [DefaultValue("default")]
@@ -343,13 +374,13 @@ namespace Greenshot.Base.Core
         [Description("A list of experimental features, this allows us to test certain features before releasing them.")]
         List<string> ExperimentalFeatures { get; set; }
 
-        [Description("Specify what action is made if the tray icon is left clicked, if a double-click action is specified this action is initiated after a delay (configurable via the windows double-click speed)")]
-        [DefaultValue("SHOW_CONTEXT_MENU")]
-        ClickActions LeftClickAction { get; set; }
+        [Description("The id of the recipe which runs when the tray icon is clicked, empty for nothing. With a double-click recipe it runs after the double-click time of Windows.")]
+        [DefaultValue("recipe_tray_menu")]
+        string TrayClickRecipe { get; set; }
 
-        [Description("Specify what action is made if the tray icon is double clicked")]
-        [DefaultValue("OPEN_LAST_IN_EXPLORER")]
-        ClickActions DoubleClickAction { get; set; }
+        [Description("The id of the recipe which runs when the tray icon is double-clicked, empty for nothing")]
+        [DefaultValue("recipe_open_capture_folder")]
+        string TrayDoubleClickRecipe { get; set; }
 
         [Description("Sets if the zoomer is enabled")]
         [DefaultValue(true)]
@@ -400,14 +431,6 @@ namespace Greenshot.Base.Core
         [DefaultValue("")]
         string MailApiBCC { get; set; }
 
-        [Description("Optional command to execute on a temporary PNG file, the command should overwrite the file and Greenshot will read it back. Note: this command is also executed when uploading PNG's!")]
-        [DefaultValue("")]
-        string OptimizePNGCommand { get; set; }
-
-        [Description("Arguments for the optional command to execute on a PNG, {0} is replaced by the temp-filename from Greenshot. Note: Temp-file is deleted afterwards by Greenshot.")]
-        [DefaultValue("\"{0}\"")]
-        string OptimizePNGCommandArguments { get; set; }
-
         [Description("Version of Greenshot which created this .ini")]
         string LastSaveWithVersion { get; }
 
@@ -423,25 +446,43 @@ namespace Greenshot.Base.Core
         [DefaultValue(true)]
         bool ProcessEXIFOrientation { get; set; }
 
+        [Description("Which details are written into exported images, the program name and resolution are always written. Options: CaptureTime (when the screen was captured), Author (ExportMetadataAuthor and ExportMetadataCopyright), and the private ones Source (window title, web address), Text (text OCR found), Barcodes (content of barcodes and QR codes). Private details are written into saved files; before they leave the computer (upload, e-mail, Office) Greenshot asks, a flow without a window removes them. Empty: none of them.")]
+        [DefaultValue("CaptureTime")]
+        List<ExportMetadataField> ExportMetadata { get; set; }
+
+        [Description("The author written into exported images when ExportMetadata contains Author")]
+        string ExportMetadataAuthor { get; set; }
+
+        [Description("The copyright notice written into exported images when ExportMetadata contains Author")]
+        string ExportMetadataCopyright { get; set; }
+
         [Description("The last used region, for reuse in the capture last region")]
         NativeRect LastCapturedRegion { get; set; }
 
-        [Description("The sizes of the fixed size capture (F in the region selection), width x height separated by commas")]
+        [Description("The sizes of the fixed size capture (F in the region selection), width x height separated by commas. Optionally with a place: 1280x720+100+200 is 100, 200 from the top left of the main monitor, 1280x720+100+200@1920+0 of the monitor at 1920, 0, 1280x720+10+40@notepad.exe of the content of a window of notepad.exe")]
         [DefaultValue("640x480,800x600,1024x768,1280x720,1920x1080")]
         List<string> FixedCaptureSizes { get; set; }
 
-        [Description("The sizes of the last region captures, the fixed size capture offers them below its own sizes")]
-        List<string> RecentCaptureSizes { get; set; }
+        [Description("The sizes and places of the last region captures (e.g. 1280x720+100+200@1920+0), the fixed size capture offers them below its own sizes")]
+        List<string> RecentCaptureAreas { get; set; }
 
-        [Description("The size of the last fixed size capture, the fixed size capture starts with it")]
-        NativeSize FixedCaptureSize { get; set; }
+        [Description("The size and place of the last fixed size capture (e.g. 1280x720+100+200), the fixed size capture starts with it")]
+        string FixedCaptureArea { get; set; }
+
+        [Description("What the fixed size capture remembers of the last region captures: Size, Screen (also the place on the monitor) or Window (also the place in the window of the program, else on the monitor)")]
+        [DefaultValue("Window")]
+        FixedCaptureRemember FixedCaptureRemembers { get; set; }
+
+        [Description("Picking a size with a place in the fixed size capture moves the mouse so the area is there; false: the place is only shown, the area snaps onto it")]
+        [DefaultValue(true)]
+        bool FixedCaptureMovesCursor { get; set; }
 
         [Description("Where the cursor holds the area of the fixed size capture: TopLeft, TopRight, BottomRight, BottomLeft or Center, C changes it")]
         [DefaultValue("TopLeft")]
         FixedCaptureAnchor FixedCaptureAnchor { get; set; }
 
         [DataMember(Name = "BaseIconSize")]
-        [Description("Defines the base size of the icons (e.g. for the buttons in the editor), default value 16,16 and it's scaled to the current DPI")]
+        [Description("Defines the base size of the icons (e.g. for the buttons in the editor and the menus) at 100%, in steps of 4, default value 16,16. It's scaled to the DPI of the display the menu or window is on")]
         [DefaultValue("16,16")]
         NativeSize IconSize { get; set; }
 
@@ -477,14 +518,16 @@ namespace Greenshot.Base.Core
         [DefaultValue(true)]
         bool AiToolsNotifyOnCapture { get; set; }
 
-        /// <summary>Normalizes <see cref="OutputFilePath"/>; sets the default output folder when none is configured. A configured folder which doesn't exist stays.</summary>
-        void ValidateAndCorrectOutputFilePath();
+        /// <summary>Sets the default output folder when <see cref="OutputDirectory"/> is empty. A configured folder which doesn't exist stays.</summary>
+        void ValidateAndCorrectOutputDirectory();
 
         /// <summary>
-        /// The folder for a new screenshot: <see cref="OutputFilePath"/> with its variables filled in, created when it doesn't exist.
+        /// The folder for a new screenshot: <see cref="OutputDirectory"/> rendered for the capture, created when it doesn't exist.
         /// When it can't be used, the default output folder for this save only, <paramref name="problem"/> tells why.
         /// </summary>
-        string GetOutputDirectory(out string problem);
+        /// <param name="scope">What the template can use, e.g. the time of the capture; null for none</param>
+        /// <param name="problem">Why the configured folder couldn't be used, null when it is used</param>
+        string GetOutputDirectory(Greenshot.Base.Expressions.VariableScope scope, out string problem);
 
         /// <summary>Validates <see cref="OutputFileAsFullpath"/>; resets it to a default full-path dummy when the directory no longer exists.</summary>
         void ValidateAndCorrectOutputFileAsFullpath();

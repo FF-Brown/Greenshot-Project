@@ -66,8 +66,17 @@ The Jira upload window (`Greenshot.Plugin.Atlassian/Jira/Views/JiraUploadWindow.
 - **`ThemeManager.Instance`** has the brushes of the current theme (`BackgroundBrush`, `ForegroundBrush`, `MutedBrush`, `BorderBrush`,
   `ControlBackgroundBrush`, `TextBoxBackgroundBrush`, `AccentBrush`, `WarningBrush`, `ErrorBrush`, ...) and raises `PropertyChanged` when the
   theme changes. Bind to them, never write a color into the XAML, or the window breaks in the dark theme.
+- **`ThemeScope.Theme`** is what the shared styles bind to: an inherited value, `ThemeManager.Instance` unless an element above sets a
+  `ThemePalette` (the panel area of the editor sets the editor palette). Both have the same brush names, so
+  `{Binding Path=(wpf:ThemeScope.Theme).ForegroundBrush, RelativeSource={RelativeSource Self}}` gives the right color in a window
+  and in an editor panel. Use it in views which can be shown in the editor; context menus and tool tips keep Greenshot's theme.
 - **`WindowFrameTheme`** colors the frame of Windows to match the theme. WPF windows get it on their own, a WinForms form calls
   `WindowFrameTheme.Attach(handle)` when its handle is created.
+- **The editor (WinForms)** has its own setting on the Editor tab of the settings, `Editor.EditorTheme` (Light by default, Dark,
+  Same as Windows), so it can stay light in a dark Greenshot. `EditorTheme.Current` has its colors (system colors in light and high
+  contrast, the dark palette in dark) and `EditorTheme.Changed` is raised when they change. Editor controls take their colors from there,
+  never from `SystemColors` directly. The capture and its elements are never themed. The title bar follows the editor setting too: a `GreenshotForm` with its own
+  theme overrides `IsDarkTitleBar` and calls `WindowFrameTheme.Update(handle)` when it changes.
 - **Message boxes:** use `ThemedMessageBox.Show` (or `ShowChoice` with own button texts) instead of `MessageBox.Show`, so the message box has the theme too.
 
 ## Reuse the shared styles
@@ -80,10 +89,11 @@ looks the same and a change of the design is made in one place. Merge the dictio
 |---|---|
 | `DialogStyles.xaml` | The usual start for a window: merges the shared button, check box, expander and list styles and themes `Label`, `TextBox`, `ComboBox` and the list views by default. |
 | `ButtonStyles.xaml` | `PrimaryButtonStyle` (the main action, e.g. OK), `SecondaryButtonStyle` (the other actions, e.g. Cancel), `WarnButtonStyle`, `ErrorButtonStyle` (strong red, destructive), `LightErrorButtonStyle` (a lighter delete), text-only buttons `PrimaryTextButtonStyle`, `SecondaryTextButtonStyle`, `LinkTextButtonStyle`, `ToolboxButtonStyle`, `PaletteSwatchStyle`, `DefaultRadioButtonStyle`, `FilterChipRadioButtonStyle`, and the caption buttons `TitleBarButtonStyle`, `TitleCloseButtonStyle`. |
+| `ComboBoxStyles.xaml` | `DefaultComboBoxStyle`, the default style of every `ComboBox` in a window which merges it; with `IsEditable="True"` the box takes typing and the list offers values. |
 | `CheckBoxStyles.xaml` | `GreenshotCheckBoxStyle`, also the default style of every `CheckBox` in a window which merges it. |
 | `ExpanderStyles.xaml` | `ExpanderStyle`: a header with an arrow which turns when the content is shown (settings groups, error details). |
-| `ListViewStyles.xaml` | `ThemeListView`, `ThemeListViewItem`, `ThemeGridViewColumnHeader`. |
-| `PillStyles.xaml` | `PillStyle` (an entry shown as a pill), `RemoveEntryButtonStyle` (the small x in it), `AddPillButtonStyle` (the + at the end of the list). |
+| `ListViewStyles.xaml` | `ThemeListView`, `ThemeListViewItem`, `ThemeGridViewColumnHeader`; `ThemeListBox` and `ThemeListBoxItem` for a list without columns, e.g. tiles in a `WrapPanel`. |
+| `PillStyles.xaml` | `PillStyle` (an entry shown as a pill), `EditEntryButtonStyle` (its text as a button, e.g. a click changes the entry), `RemoveEntryButtonStyle` (the small x in it), `TakeEntryButtonStyle` (a small + which takes the entry into another list), `AddPillButtonStyle` (the + at the end of the list). |
 | `MenuStyles.xaml` | `GreenshotContextMenuStyle`, `GreenshotMenuItemStyle`, `GreenshotMenuSeparatorStyle`; `ThemedMenu` uses them for the tray menu and the other menus. |
 
 ```xaml
@@ -208,6 +218,12 @@ The settings window shows the view (a `UserControl`, e.g. `JiraConfigurationView
 - WinForms images, icons and sounds are embedded files loaded with `EmbeddedResources`, never put into a .resx with the designer
   (see "Adding images" in the README).
 - Icons are drawn by the Greenshot team, don't replace or redraw them in a UI change.
+- Icons on WinForms tool strips and menus are bound, not assigned: `IconBinder.Bind(item, IconSource.FromResource(type, name))`
+  (or `IconSource.FromKey` for destination icon keys, `IconSource.FromImage` for an image you made, e.g. a window icon). The size is
+  `IconSizing.PixelSize`: the icon size setting (16 at 100%) times the DPI of the display, so 24 pixels at 150%.
+  `IconBinder.ApplyForDpi(toolStrip, dpi, name)` sizes a tool strip and its drop downs; call it when the window is created and on a DPI change.
+  The 16 pixel artwork is scaled sharp (nearest neighbour to the next whole multiple, then a smooth reduction), each item gets its own
+  copy and the binder disposes it with the item. Don't set `item.Image` for an icon, the tool strip would scale it blurry.
 
 ## Threads
 
