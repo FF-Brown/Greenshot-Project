@@ -1837,7 +1837,7 @@ namespace Greenshot.Editor.Drawing
             ResizeCanvasInternal(expansion, true);
         }
 
-        internal IMemento ResizeCanvasForUndo(Expansion expansion)
+        public IMemento ResizeCanvasWithoutRecordingUndo(Expansion expansion)
         {
             return ResizeCanvasInternal(expansion, false);
         }

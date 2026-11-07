@@ -996,21 +996,13 @@ namespace Greenshot.Editor.Drawing
             }
 
             Expansion expansion = GetExpansionFromSize(direction, targetElement.Bounds.Size);
-            
-            IMemento canvasMemento = null;
-            if (surface is Surface concreteSurface)
-            {
-                canvasMemento = concreteSurface.ResizeCanvasForUndo(expansion);
-            }
-            else
-            {
-                surface.ResizeCanvas(expansion);
-            }
+
+            IMemento canvasMemento = surface.ResizeCanvasWithoutRecordingUndo(expansion);
 
             Size surfaceSize = GetSurfaceSize(surface);
             if (!surfaceSize.IsEmpty)
             {
-                IMemento elementMemento = surface is Surface && targetElement.IsUndoable
+                IMemento elementMemento = targetElement.IsUndoable
                     ? new DrawableContainerBoundsChangeMemento(targetElement)
                     : null;
                 if (elementMemento == null)
