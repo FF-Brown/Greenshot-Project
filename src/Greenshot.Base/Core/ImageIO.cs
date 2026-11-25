@@ -1,13 +1,13 @@
-﻿/*
+/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -20,22 +20,23 @@
  */
 
 using System;
+using System.Collections.Concurrent;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Windows.Forms;
-using Greenshot.Base.Controls;
-using Greenshot.Base.Core.Enums;
+using System.Threading;
+using System.Threading.Tasks;
 using Greenshot.Base.Core.FileFormatHandlers;
-using Greenshot.Base.IniFile;
+using Dapplo.Ini;
+using Greenshot.Base.Core.FileFormat;
 using Greenshot.Base.Interfaces;
 using Greenshot.Base.Interfaces.Plugin;
+using Greenshot.Base.Threading;
 using log4net;
 
 namespace Greenshot.Base.Core
@@ -46,9 +47,11 @@ namespace Greenshot.Base.Core
     public static class ImageIO
     {
         private static readonly ILog Log = LogManager.GetLogger(typeof(ImageIO));
-        private static readonly CoreConfiguration CoreConfig = IniConfig.GetIniSection<CoreConfiguration>();
+        private static readonly ICoreConfiguration CoreConfig = IniConfigRegistry.GetSection<ICoreConfiguration>();
         private static readonly int PROPERTY_TAG_SOFTWARE_USED = 0x0131;
-        private static readonly Cache<string, string> TmpFileCache = new Cache<string, string>(10 * 60 * 60, RemoveExpiredTmpFile);
+        // The temporary files which are still there, removed by the housekeeping after TmpFileLifetime or at exit
+        private static readonly ConcurrentDictionary<string, bool> TmpFiles = new ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        private static readonly TimeSpan TmpFileLifetime = TimeSpan.FromHours(10);
 
         /// <summary>
         /// Creates a PropertyItem (Metadata) to store with the image.
@@ -116,9 +119,9 @@ namespace Greenshot.Base.Core
         {
             bool useMemoryStream = false;
             MemoryStream memoryStream = null;
-            if (outputSettings.Format == OutputFormat.greenshot && surface == null)
+            if (WellKnownFileFormats.IsEqualFormat(WellKnownFileFormats.Greenshot, outputSettings.Format) && surface == null)
             {
-                throw new ArgumentException("Surface needs to be set when using OutputFormat.Greenshot");
+                throw new ArgumentException("Surface needs to be set when using OutputFormat .greenshot");
             }
 
             try
@@ -130,14 +133,14 @@ namespace Greenshot.Base.Core
                 {
                     useMemoryStream = true;
                     Log.Warn("Using a memory stream prevent an issue with saving to a non seekable stream.");
-                    memoryStream = new MemoryStream();
+                    memoryStream = RecyclableMemoryStreamFactory.GetStream("ImageIO.SaveToStream");
                     targetStream = memoryStream;
                 }
 
                 var fileFormatHandlers = SimpleServiceProvider.Current.GetAllInstances<IFileFormatHandler>();
-                if (!fileFormatHandlers.TrySaveToStream(imageToSave as Bitmap, targetStream, outputSettings.Format.ToString(), surface, outputSettings))
+                if (!fileFormatHandlers.TrySaveToStream(imageToSave as Bitmap, targetStream, FileFormatRegistry.GetPreferredExtension(outputSettings.Format), surface, outputSettings))
                 {
-                    return;
+                    throw new InvalidOperationException($"No file format handler could save an image using format '{outputSettings.Format}'.");
                 }
 
                 // If we used a memory stream, we need to stream the memory stream to the original stream.
@@ -153,6 +156,24 @@ namespace Greenshot.Base.Core
         }
 
         /// <summary>
+        /// Write the .greenshot format: the image as PNG, then the serialized elements, their length and the marker "GreenshotXX.YY"
+        /// (see <see cref="LoadGreenshotSurface(Stream, ISurface)"/>). Doesn't touch the surface, so it can run on any thread which owns the image.
+        /// </summary>
+        /// <param name="destination">Stream to write to</param>
+        /// <param name="image">The image of the surface, without the elements</param>
+        /// <param name="elements">The elements, from ISurface.SaveElementsToStream</param>
+        /// <param name="elementsLength">The length SaveElementsToStream returned</param>
+        public static void WriteGreenshotFormat(Stream destination, Image image, MemoryStream elements, long elementsLength)
+        {
+            image.Save(destination, ImageFormat.Png);
+            elements.WriteTo(destination);
+            using var writer = new BinaryWriter(destination, Encoding.ASCII, true);
+            writer.Write(elementsLength);
+            Version v = typeof(ImageIO).Assembly.GetName().Version;
+            writer.Write(Encoding.ASCII.GetBytes($"Greenshot{v.Major:00}.{v.Minor:00}"));
+        }
+
+        /// <summary>
         /// Create an image from a surface with the settings from the output settings applied
         /// </summary>
         /// <param name="surface"></param>
@@ -161,25 +182,36 @@ namespace Greenshot.Base.Core
         /// <returns>true if the image must be disposed</returns>
         public static bool CreateImageFromSurface(ISurface surface, SurfaceOutputSettings outputSettings, out Image imageToSave)
         {
-            bool disposeImage = false;
-
-            if (outputSettings.Format == OutputFormat.greenshot || outputSettings.SaveBackgroundOnly)
+            if (WellKnownFileFormats.IsEqualFormat(WellKnownFileFormats.Greenshot, outputSettings.Format) || outputSettings.SaveBackgroundOnly)
             {
                 // We save the image of the surface, this should not be disposed
                 imageToSave = surface.Image;
-            }
-            else
-            {
-                // We create the export image of the surface to save
-                imageToSave = surface.GetImageForExport();
-                disposeImage = true;
+                // The following block of modifications should be skipped when saving the greenshot format, no effects or otherwise!
+                if (WellKnownFileFormats.IsEqualFormat(WellKnownFileFormats.Greenshot, outputSettings.Format))
+                {
+                    return false;
+                }
+
+                return CreateImageForOutput(imageToSave, false, outputSettings, out imageToSave);
             }
 
-            // The following block of modifications should be skipped when saving the greenshot format, no effects or otherwise!
-            if (outputSettings.Format == OutputFormat.greenshot)
-            {
-                return disposeImage;
-            }
+            // We create the export image of the surface to save
+            return CreateImageForOutput(surface.GetImageForExport(), true, outputSettings, out imageToSave);
+        }
+
+        /// <summary>
+        /// Apply the output settings (effects, color reduction) to an already rendered image, without the surface: this can run on any thread
+        /// which owns (or borrows, and doesn't share) the source image.
+        /// </summary>
+        /// <param name="sourceImage">The rendered capture</param>
+        /// <param name="ownsSourceImage">True when the source image may be disposed here once it is replaced</param>
+        /// <param name="outputSettings">SurfaceOutputSettings</param>
+        /// <param name="imageToSave">The result, can be the source image</param>
+        /// <returns>true if the result is a new image (or the owned source image) which the caller must dispose</returns>
+        public static bool CreateImageForOutput(Image sourceImage, bool ownsSourceImage, SurfaceOutputSettings outputSettings, out Image imageToSave)
+        {
+            imageToSave = sourceImage;
+            bool disposeImage = ownsSourceImage;
 
             Image tmpImage;
             if (outputSettings.Effects != null && outputSettings.Effects.Count > 0)
@@ -332,105 +364,75 @@ namespace Greenshot.Base.Core
         }
 
         /// <summary>
-        /// Get the OutputFormat for a filename
+        /// Saves a pre-rendered bitmap to disk. Unlike <see cref="Save"/>, this method does not call
+        /// <see cref="CreateImageFromSurface"/> — the caller is responsible for rendering the bitmap on the
+        /// UI thread before calling this method, allowing the encode+write work to run on a background thread.
+        /// If <paramref name="copyPathToClipboard"/> is true the path is placed on the clipboard, which works on any thread.
+        /// </summary>
+        /// <param name="uiContext">Not used anymore, the clipboard doesn't need the UI thread</param>
+        public static void SaveRenderedImage(Image renderedBitmap, string fullPath, bool allowOverwrite,
+            SurfaceOutputSettings outputSettings, bool copyPathToClipboard, SynchronizationContext uiContext = null)
+        {
+            // Check before the file is created, otherwise an empty file is left behind
+            if (WellKnownFileFormats.IsEqualFormat(WellKnownFileFormats.Greenshot, outputSettings.Format))
+            {
+                throw new NotSupportedException($"The greenshot format needs the surface, use {nameof(Save)} instead.");
+            }
+
+            fullPath = FilenameHelper.MakeFqFilenameSafe(fullPath);
+            string path = Path.GetDirectoryName(fullPath);
+
+            if (path != null)
+            {
+                DirectoryInfo di = new DirectoryInfo(path);
+                if (!di.Exists)
+                {
+                    Directory.CreateDirectory(di.FullName);
+                }
+            }
+
+            if (!allowOverwrite && File.Exists(fullPath))
+            {
+                ArgumentException throwingException = new ArgumentException("File '" + fullPath + "' already exists.");
+                throwingException.Data.Add("fullPath", fullPath);
+                throw throwingException;
+            }
+
+            Log.DebugFormat("Saving pre-rendered bitmap to {0}", fullPath);
+            using (FileStream stream = new FileStream(fullPath, FileMode.Create, FileAccess.Write))
+            {
+                SaveToStream(renderedBitmap, null, stream, outputSettings);
+            }
+
+            if (copyPathToClipboard)
+            {
+                // The clipboard works on any thread
+                ClipboardHelper.SetClipboardData(fullPath);
+            }
+        }
+
+        /// <summary>
+        /// Get the registered file format ID for a filename
         /// </summary>
         /// <param name="fullPath">filename (can be a complete path)</param>
-        /// <returns>OutputFormat</returns>
-        public static OutputFormat FormatForFilename(string fullPath)
+        /// <returns>File format ID</returns>
+        public static string FormatForFilename(string fullPath)
         {
-            // Fix for bug 2912959
-            string extension = fullPath.Substring(fullPath.LastIndexOf(".", StringComparison.Ordinal) + 1);
-            OutputFormat format = OutputFormat.png;
-            try
+            string extension = Path.GetExtension(fullPath)?.TrimStart('.');
+            var registry = SimpleServiceProvider.Current.GetInstance<IFileFormatRegistry>(true);
+            var fallbackExtension = WellKnownFileFormats.Png;
+            if (registry is null)
             {
-                format = (OutputFormat) Enum.Parse(typeof(OutputFormat), extension.ToLower());
+                Log.WarnFormat("File format registry is not available, defaulting to ({0})", fallbackExtension);
+                return fallbackExtension;
             }
-            catch (ArgumentException ae)
+            var formatId =  registry.GetByExtension(extension)?.Id;
+            if (string.IsNullOrEmpty(formatId))
             {
-                Log.Warn("Couldn't parse extension: " + extension, ae);
-            }
-
-            return format;
-        }
-
-        /// <summary>
-        /// Save with showing a dialog
-        /// </summary>
-        /// <param name="surface"></param>
-        /// <param name="captureDetails"></param>
-        /// <returns>Path to filename</returns>
-        public static string SaveWithDialog(ISurface surface, ICaptureDetails captureDetails)
-        {
-            string returnValue = null;
-            using (SaveImageFileDialog saveImageFileDialog = new SaveImageFileDialog(captureDetails))
-            {
-                DialogResult dialogResult = saveImageFileDialog.ShowDialog();
-                if (!dialogResult.Equals(DialogResult.OK)) return returnValue;
-                try
-                {
-                    string fileNameWithExtension = saveImageFileDialog.FileNameWithExtension;
-                    SurfaceOutputSettings outputSettings = new SurfaceOutputSettings(FormatForFilename(fileNameWithExtension));
-                    if (CoreConfig.OutputFilePromptQuality)
-                    {
-                        QualityDialog qualityDialog = new QualityDialog(outputSettings);
-                        qualityDialog.ShowDialog();
-                    }
-
-                    // TODO: For now we always overwrite, should be changed
-                    Save(surface, fileNameWithExtension, true, outputSettings, CoreConfig.OutputFileCopyPathToClipboard);
-                    returnValue = fileNameWithExtension;
-                    IniConfig.Save();
-                }
-                catch (ExternalException)
-                {
-                    MessageBox.Show(Language.GetFormattedString("error_nowriteaccess", saveImageFileDialog.FileName).Replace(@"\\", @"\"), Language.GetString("error"));
-                }
-            }
-
-            return returnValue;
-        }
-
-        /// <summary>
-        /// Create a tmpfile which has the name like in the configured pattern.
-        /// Used e.g. by the email export
-        /// </summary>
-        /// <param name="surface"></param>
-        /// <param name="captureDetails"></param>
-        /// <param name="outputSettings"></param>
-        /// <returns>Path to image file</returns>
-        public static string SaveNamedTmpFile(ISurface surface, ICaptureDetails captureDetails, SurfaceOutputSettings outputSettings)
-        {
-            string pattern = CoreConfig.OutputFileFilenamePattern;
-            if (string.IsNullOrEmpty(pattern?.Trim()))
-            {
-                pattern = "greenshot ${capturetime}";
-            }
-
-            string filename = FilenameHelper.GetFilenameFromPattern(pattern, outputSettings.Format, captureDetails);
-            // Prevent problems with "other characters", which causes a problem in e.g. Outlook 2007 or break our HTML
-            filename = Regex.Replace(filename, @"[^\d\w\.]", "_");
-            // Remove multiple "_"
-            filename = Regex.Replace(filename, @"_+", "_");
-            string tmpFile = Path.Combine(Path.GetTempPath(), filename);
-
-            Log.Debug("Creating TMP File: " + tmpFile);
-
-            // Catching any exception to prevent that the user can't write in the directory.
-            // This is done for e.g. bugs #2974608, #2963943, #2816163, #2795317, #2789218
-            try
-            {
-                Save(surface, tmpFile, true, outputSettings, false);
-                TmpFileCache.Add(tmpFile, tmpFile);
-            }
-            catch (Exception e)
-            {
-                // Show the problem
-                MessageBox.Show(e.Message, "Error");
-                // when save failed we present a SaveWithDialog
-                tmpFile = SaveWithDialog(surface, captureDetails);
-            }
-
-            return tmpFile;
+                Log.WarnFormat("No file format registered for extension {0}, defaulting to ({1})", extension, fallbackExtension);
+                return fallbackExtension;
+            } 
+            return formatId;
         }
 
         /// <summary>
@@ -447,8 +449,8 @@ namespace Greenshot.Base.Core
                 if (File.Exists(tmpfile))
                 {
                     File.Delete(tmpfile);
-                    TmpFileCache.Remove(tmpfile);
                 }
+                TmpFiles.TryRemove(tmpfile, out _);
 
                 return true;
             }
@@ -461,29 +463,23 @@ namespace Greenshot.Base.Core
         }
 
         /// <summary>
-        /// Helper method to create a temp image file
+        /// Writes already encoded image bytes to a temp file, so an image which was encoded once doesn't need to be encoded again.
+        /// The file is removed later, see RegisterTmpFile.
         /// </summary>
-        /// <param name="surface"></param>
-        /// <param name="outputSettings"></param>
-        /// <param name="destinationPath"></param>
-        /// <returns></returns>
-        public static string SaveToTmpFile(ISurface surface, SurfaceOutputSettings outputSettings, string destinationPath)
+        /// <param name="encoded">MemoryStream with the encoded image, the position isn't changed</param>
+        /// <param name="format">the format of the encoded bytes, used for the extension</param>
+        /// <param name="destinationPath">directory, null for Greenshot's temp directory (see GetTmpDirectory)</param>
+        /// <returns>the path of the temp file, null when it couldn't be written</returns>
+        public static string SaveEncodedToTmpFile(MemoryStream encoded, string format, string destinationPath)
         {
-            string tmpFile = Path.GetRandomFileName() + "." + outputSettings.Format;
-            // Prevent problems with "other characters", which could cause problems
-            tmpFile = Regex.Replace(tmpFile, @"[^\d\w\.]", string.Empty);
-            if (destinationPath == null)
-            {
-                destinationPath = Path.GetTempPath();
-            }
-
-            string tmpPath = Path.Combine(destinationPath, tmpFile);
-            Log.Debug("Creating TMP File : " + tmpPath);
-
+            string tmpPath = CreateTmpFilePath(format, destinationPath);
             try
             {
-                Save(surface, tmpPath, true, outputSettings, false);
-                TmpFileCache.Add(tmpPath, tmpPath);
+                using (var stream = new FileStream(tmpPath, FileMode.Create, FileAccess.Write))
+                {
+                    encoded.WriteTo(stream);
+                }
+                RegisterTmpFile(tmpPath);
             }
             catch (Exception)
             {
@@ -494,33 +490,120 @@ namespace Greenshot.Base.Core
         }
 
         /// <summary>
-        /// Cleanup all created tmpfiles
-        /// </summary>	
-        public static void RemoveTmpFiles()
+        /// A path for a temp file with a random name and the extension of the format
+        /// </summary>
+        /// <param name="format">the file format, used for the extension</param>
+        /// <param name="destinationPath">directory, null for Greenshot's temp directory (see GetTmpDirectory)</param>
+        /// <returns>the path, the file isn't created</returns>
+        public static string CreateTmpFilePath(string format, string destinationPath)
         {
-            foreach (string tmpFile in TmpFileCache.Elements)
-            {
-                if (File.Exists(tmpFile))
-                {
-                    Log.DebugFormat("Removing old temp file {0}", tmpFile);
-                    File.Delete(tmpFile);
-                }
+            string tmpFile = Path.GetRandomFileName() + FileFormatRegistry.GetPreferredExtensionWithDot(format);
+            // Prevent problems with "other characters", which could cause problems
+            tmpFile = Regex.Replace(tmpFile, @"[^\d\w\.]", string.Empty);
+            string tmpPath = Path.Combine(destinationPath ?? GetTmpDirectory(), tmpFile);
+            Log.Debug("Creating TMP File : " + tmpPath);
+            return tmpPath;
+        }
 
-                TmpFileCache.Remove(tmpFile);
+        /// <summary>
+        /// Greenshot's own folder for temporary files (%TEMP%\Greenshot\Files), created when missing. What is left there (a file still in use
+        /// at exit, or after a crash) is removed at a later start by RemoveExpiredTmpFiles, without remembering anything.
+        /// </summary>
+        public static string GetTmpDirectory()
+        {
+            Directory.CreateDirectory(TmpDirectory);
+            return TmpDirectory;
+        }
+
+        private static string TmpDirectory => Path.Combine(Path.GetTempPath(), "Greenshot", "Files");
+
+        /// <summary>
+        /// Removes the files in Greenshot's temp directory which are older than the lifetime of a temp file, e.g. left by an earlier run
+        /// </summary>
+        public static void RemoveExpiredTmpFiles()
+        {
+            if (!Directory.Exists(TmpDirectory))
+            {
+                return;
+            }
+            var expired = DateTime.UtcNow - TmpFileLifetime;
+            foreach (var file in new DirectoryInfo(TmpDirectory).EnumerateFiles())
+            {
+                if (file.LastWriteTimeUtc < expired)
+                {
+                    TryDeleteTmpFile(file.FullName);
+                }
             }
         }
 
         /// <summary>
-        /// Cleanup handler for expired tempfiles
+        /// Remember a temporary file, the housekeeping removes it after a while, RemoveTmpFiles at exit.
         /// </summary>
-        /// <param name="filekey"></param>
-        /// <param name="filename"></param>
-        private static void RemoveExpiredTmpFile(string filekey, object filename)
+        public static void RegisterTmpFile(string tmpFile)
         {
-            if (filename is string path && File.Exists(path))
+            if (string.IsNullOrEmpty(tmpFile) || !TmpFiles.TryAdd(tmpFile, true))
             {
-                Log.DebugFormat("Removing expired file {0}", path);
-                File.Delete(path);
+                return;
+            }
+            Housekeeping.Current?.Enqueue("Remove an expired temp file", cancellationToken =>
+            {
+                if (TmpFiles.ContainsKey(tmpFile) && TryDeleteTmpFile(tmpFile))
+                {
+                    TmpFiles.TryRemove(tmpFile, out _);
+                }
+                return Task.CompletedTask;
+            }, TmpFileLifetime);
+        }
+
+        /// <summary>
+        /// Cleanup all created tmpfiles
+        /// </summary>	
+        public static void RemoveTmpFiles()
+        {
+            foreach (string tmpFile in TmpFiles.Keys)
+            {
+                TryDeleteTmpFile(tmpFile);
+                TmpFiles.TryRemove(tmpFile, out _);
+            }
+            // Nothing stays behind when the folder is empty (the parent can still hold the state of a restart)
+            TryDeleteEmptyDirectory(TmpDirectory);
+            TryDeleteEmptyDirectory(Path.GetDirectoryName(TmpDirectory));
+        }
+
+        private static void TryDeleteEmptyDirectory(string directory)
+        {
+            try
+            {
+                if (Directory.Exists(directory) && !Directory.EnumerateFileSystemEntries(directory).Any())
+                {
+                    Directory.Delete(directory);
+                }
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                Log.DebugFormat("Couldn't remove the folder {0}: {1}", directory, ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Deletes the temp file, a file which is still in use (e.g. opened by the app it was handed to) is left
+        /// </summary>
+        /// <returns>false when it couldn't be deleted</returns>
+        private static bool TryDeleteTmpFile(string tmpFile)
+        {
+            try
+            {
+                if (File.Exists(tmpFile))
+                {
+                    Log.DebugFormat("Removing temp file {0}", tmpFile);
+                    File.Delete(tmpFile);
+                }
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                Log.WarnFormat("Couldn't remove the temp file {0}: {1}", tmpFile, ex.Message);
+                return false;
             }
         }
 
@@ -571,32 +654,32 @@ namespace Greenshot.Base.Core
                 return null;
             }
 
-            if (!string.IsNullOrEmpty(extension))
-            {
-                extension = extension.Replace(".", string.Empty);
-            }
-
+            var fileFormatHandlers = SimpleServiceProvider.Current.GetAllInstances<IFileFormatHandler>();
             var startingPosition = stream.Position;
-
             // Make sure we can try multiple times
             if (!stream.CanSeek)
             {
-                var memoryStream = new MemoryStream();
+                var memoryStream = RecyclableMemoryStreamFactory.GetStream("ImageIO.LoadImageFromStream");
                 stream.CopyTo(memoryStream);
                 stream = memoryStream;
                 // As we are if a different stream, which starts at 0, change the starting position
                 startingPosition = 0;
             }
-            var fileFormatHandlers = SimpleServiceProvider.Current.GetAllInstances<IFileFormatHandler>();
-            foreach (var fileFormatHandler in fileFormatHandlers
-                         .Where(ffh => ffh.Supports(FileFormatHandlerActions.LoadFromStream, extension))
-                         .OrderBy(ffh => ffh.PriorityFor(FileFormatHandlerActions.LoadFromStream, extension)))
+
+            try
             {
-                stream.Seek(startingPosition, SeekOrigin.Begin);
-                if (fileFormatHandler.TryLoadFromStream(stream, extension, out var bitmap))
+                if (fileFormatHandlers.TryLoadFromStream(stream, extension, out var bitmap))
                 {
                     return bitmap;
                 }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Couldn't read file contents", ex);
+            }
+            finally
+            {
+                stream?.Dispose();
             }
 
             return null;
@@ -651,5 +734,6 @@ namespace Greenshot.Base.Core
 
             return returnSurface;
         }
+
     }
 }

@@ -1,0 +1,733 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Input;
+using Dapplo.Ini;
+using Greenshot.Base.Languages;
+using Greenshot.Base.Core;
+using Greenshot.Base.Recipes;
+using Greenshot.Base.Recipes.Pipeline;
+using Greenshot.Base.Recipes.Triggers;
+using Greenshot.Base.Wpf;
+using Greenshot.Base.Controls;
+using Greenshot.Base.Threading;
+
+namespace Greenshot.Plugin.RecipeEditor.ViewModels
+{
+    /// <summary>
+    /// A recipe from the catalog in the list of the update check
+    /// </summary>
+    public class CatalogRecipeItemViewModel : ViewModelBase
+    {
+        public CatalogRecipeItemViewModel(RecipeCatalogStatus status, Action update)
+        {
+            Status = status ?? throw new ArgumentNullException(nameof(status));
+            UpdateCommand = new RelayCommand(() => update?.Invoke(), () => status.CanUpdate);
+        }
+
+        public RecipeCatalogStatus Status { get; }
+
+        public string Name => Status.Name;
+
+        public string Id => Status.Id;
+
+        public string Versions => string.Format(Texts.Get<IRecipeEditorLanguage>().ManagerCatalogVersions,
+            string.IsNullOrWhiteSpace(Status.InstalledVersion) ? "?" : Status.InstalledVersion, Status.CatalogVersion ?? "-");
+
+        /// <summary>
+        /// Why it is listed, or why it can't be updated
+        /// </summary>
+        public string State
+        {
+            get
+            {
+                var texts = Texts.Get<IRecipeEditorLanguage>();
+                var lines = new List<string>();
+                if (!Status.IsLoaded)
+                {
+                    lines.Add(texts.ManagerCatalogNotLoaded);
+                }
+                if (Status.CatalogVersion == null)
+                {
+                    lines.Add(texts.ManagerCatalogRemoved);
+                }
+                else if (Status.NeedsNewerGreenshot)
+                {
+                    lines.Add(string.Format(texts.ManagerCatalogNeedsNewer, Status.MinGreenshot));
+                }
+                else if (!Status.HasUpdate)
+                {
+                    lines.Add(texts.ManagerCatalogNoUpdate);
+                }
+                return string.Join(" ", lines);
+            }
+        }
+
+        public bool HasState => !string.IsNullOrEmpty(State);
+
+        public bool CanUpdate => Status.CanUpdate;
+
+        /// <summary>
+        /// The update buttons of the list are told apart by the recipe name (screen readers)
+        /// </summary>
+        public string UpdateButtonName => $"{Texts.Get<IRecipeEditorLanguage>().ManagerBtnCatalogUpdate}: {Name}";
+
+        public ICommand UpdateCommand { get; }
+    }
+
+    public class RecipeManagerItemViewModel : ViewModelBase
+    {
+        private readonly IRecipeManager _recipeManager;
+        private readonly ICapturePipeline _pipeline;
+        private readonly Action<CaptureRecipe> _onSelectInEditor;
+        private readonly Action _onRecipeChanged;
+
+        public CaptureRecipe Recipe { get; }
+
+        /// <summary>
+        /// An automatic step (recipe extension); <see cref="Recipe"/> is then its view as a recipe without triggers
+        /// </summary>
+        public RecipeExtension Extension { get; }
+
+        public bool IsExtension => Extension != null;
+
+        /// <summary>
+        /// An automatic step in the list: switched with its on/off option, unloaded from its file
+        /// </summary>
+        public RecipeManagerItemViewModel(
+            RecipeExtension extension,
+            IRecipeManager recipeManager,
+            ICapturePipeline pipeline,
+            Action<RecipeExtension> onEditExtension,
+            Action onRecipeChanged)
+            : this((extension ?? throw new ArgumentNullException(nameof(extension))).AsRecipeView(), recipeManager, pipeline, null, onRecipeChanged)
+        {
+            Extension = extension;
+            EditCommand = new RelayCommand(() => onEditExtension?.Invoke(extension), () => onEditExtension != null);
+            TestRunCommand = new RelayCommand(() => { }, () => false);
+        }
+
+        public RecipeManagerItemViewModel(
+            CaptureRecipe recipe,
+            IRecipeManager recipeManager,
+            ICapturePipeline pipeline,
+            Action<CaptureRecipe> onSelectInEditor,
+            Action onRecipeChanged)
+        {
+            Recipe = recipe ?? throw new ArgumentNullException(nameof(recipe));
+            _recipeManager = recipeManager;
+            _pipeline = pipeline;
+            _onSelectInEditor = onSelectInEditor;
+            _onRecipeChanged = onRecipeChanged;
+
+            ToggleActiveCommand = new RelayCommand(() => IsEnabled = !IsEnabled);
+            EditCommand = new RelayCommand(() => _onSelectInEditor?.Invoke(Recipe));
+            UnloadCommand = new RelayCommand(ExecuteUnload, () => CanUnload);
+            TestRunCommand = new RelayCommand(() => AsyncCommand.Run(ExecuteTestRunAsync, "Recipe test run"));
+            ReviewApprovalCommand = new RelayCommand(ExecuteReviewApproval, () => HasFilePath);
+            DetailsCommand = new RelayCommand(ExecuteShowDetails);
+        }
+
+        public string Id => Recipe.Id;
+        public string Version => string.IsNullOrWhiteSpace(Recipe.Version) ? "1.0" : Recipe.Version;
+        public string FilePath => IsExtension ? Extension.FilePath : Recipe.FilePath;
+        public bool HasFilePath => !string.IsNullOrEmpty(FilePath);
+
+        public bool IsBuiltIn => IsExtension ? Extension.IsBuiltIn : Recipe.IsBuiltIn;
+        public bool IsOverridden => IsExtension ? Extension.IsOverridden : Recipe.IsOverridden;
+
+        public string RecipeTypeBadge => IsOverridden ? Texts.Get<IRecipeEditorLanguage>().BadgeOverridden : (IsBuiltIn ? Texts.Get<IRecipeEditorLanguage>().BadgeBuiltIn : Texts.Get<IRecipeEditorLanguage>().BadgeCustom);
+
+        /// <summary>
+        /// The recipe file was written by an AI tool (and approved by the user)
+        /// </summary>
+        public bool IsAiCreated => !string.IsNullOrEmpty(IsExtension ? Extension.ProposedBy : Recipe.ProposedBy);
+
+        public string AiBadge => IsAiCreated ? "🤖 " + string.Format(Texts.Get<IRecipeEditorLanguage>().BadgeAiBy, Recipe.ProposedBy) : string.Empty;
+
+        public string Name => IsExtension ? Extension.DisplayName : Recipe.DisplayName;
+        public string Description => (IsExtension ? Extension.DisplayDescription : Recipe.DisplayDescription) ?? "";
+
+        /// <summary>
+        /// Triggers which are in the recipe but not switched on in its approval
+        /// </summary>
+        public bool HasUnapprovedTriggers => Recipe.Triggers?.Any(t => t != null && t.Enabled && !t.IsApproved) ?? false;
+
+        public bool IsEnabled
+        {
+            get => IsExtension ? Extension.EnabledOption == null || RecipeOptionStore.GetValue(Extension, Extension.EnabledOption) is true : Recipe.IsEnabled;
+            set
+            {
+                if (IsExtension)
+                {
+                    // The same switch as in Settings > Recipes and the quick settings
+                    if (Extension.EnabledOption != null && IsEnabled != value)
+                    {
+                        RecipeOptionStore.SetValue(Extension.Id, Extension.EnabledOption, value);
+                        OnPropertyChanged();
+                        OnPropertyChanged(nameof(StatusBadgeText));
+                        _onRecipeChanged?.Invoke();
+                    }
+                    return;
+                }
+                if (Recipe.IsEnabled != value)
+                {
+                    Recipe.IsEnabled = value;
+                    _recipeManager?.SetRecipeEnabled(Recipe.Id, value);
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(StatusBadgeText));
+                    _onRecipeChanged?.Invoke();
+                }
+            }
+        }
+
+        public string StatusBadgeText => IsEnabled ? Texts.Get<IRecipeEditorLanguage>().BadgeActive : Texts.Get<IRecipeEditorLanguage>().BadgeDeactivated;
+
+        public int StepCount => Recipe.Nodes?.Count ?? 0;
+
+        public string TriggersSummary
+        {
+            get
+            {
+                if (IsExtension)
+                {
+                    int changed = _recipeManager?.GetAllRecipes().Count(r => RecipeComposer.CanExtend(Extension, r)) ?? 0;
+                    return "🧩 " + string.Format(Texts.Get<IRecipeEditorLanguage>().TriggerSummaryExtension, Extension.SlotName, changed);
+                }
+                if (Recipe.Triggers == null || Recipe.Triggers.Count == 0)
+                {
+                    return Recipe.ShowInContextMenu ? "📋 " + Texts.Get<IRecipeEditorLanguage>().TriggerSummaryDefaultContextMenu : Texts.Get<IRecipeEditorLanguage>().TriggerSummaryNone;
+                }
+
+                var list = new List<string>();
+                foreach (var t in Recipe.Triggers.Where(t => t != null))
+                {
+                    string label = DescribeTrigger(t);
+                    if (!t.Enabled)
+                    {
+                        label += " " + Texts.Get<IRecipeEditorLanguage>().TriggerSuffixDisabled;
+                    }
+                    else if (!t.IsApproved)
+                    {
+                        label += " " + Texts.Get<IRecipeEditorLanguage>().TriggerSuffixNotApproved;
+                    }
+                    list.Add(label);
+                }
+
+                return string.Join("  •  ", list);
+            }
+        }
+
+        private string DescribeTrigger(TriggerConfig t)
+        {
+            string type = t.TriggerType ?? string.Empty;
+            bool Is(string triggerType) => string.Equals(type, triggerType, StringComparison.OrdinalIgnoreCase);
+            if (Is(TriggerConfig.TypeHotkey))
+            {
+                string hk = t.GetHotkey(Recipe);
+                return string.IsNullOrWhiteSpace(hk) ? "⌨ " + Texts.Get<IRecipeEditorLanguage>().TriggerHotkey : $"⌨ {hk}";
+            }
+            if (Is(TriggerConfig.TypeContextMenu))
+            {
+                return "📋 " + string.Format(Texts.Get<IRecipeEditorLanguage>().TriggerSummaryContextMenu, t.GetParameter<string>("MenuItemText") ?? Recipe.Name);
+            }
+            if (Is(TriggerConfig.TypeEditor))
+            {
+                return "🎨 " + string.Format(Texts.Get<IRecipeEditorLanguage>().TriggerSummaryEditor, t.GetParameter<string>("MenuItemText") ?? Recipe.Name);
+            }
+            if (Is(TriggerConfig.TypeClipboard))
+            {
+                return "📋 " + Texts.Get<IRecipeEditorLanguage>().TriggerClipboardMonitor;
+            }
+            if (Is(TriggerConfig.TypeCommandline))
+            {
+                string label = $"⌨ greenshot-cli.exe run {t.GetParameter<string>("Command") ?? Recipe.Id}";
+                if (t.GetParameter("AllowBrowserInvocation", false))
+                {
+                    label += t.IsBrowserInvocationApproved ? " " + Texts.Get<IRecipeEditorLanguage>().TriggerSuffixWebPages : " " + Texts.Get<IRecipeEditorLanguage>().TriggerSuffixWebPagesNotApproved;
+                }
+                return label;
+            }
+            if (Is(TriggerConfig.TypeAiTool))
+            {
+                return "🤖 " + string.Format(Texts.Get<IRecipeEditorLanguage>().TriggerSummaryAiTool, t.GetParameter<string>("ToolName") ?? t.Name);
+            }
+            if (Is(TriggerConfig.TypeOpenFile))
+            {
+                return "📂 " + Texts.Get<IRecipeEditorLanguage>().TriggerOpenFile;
+            }
+            if (Is(TriggerConfig.TypeExtension))
+            {
+                return "🌐 " + Texts.Get<IRecipeEditorLanguage>().TriggerBrowserExtension;
+            }
+            if (Is(TriggerConfig.TypeNotification))
+            {
+                return "🔔 " + Texts.Get<IRecipeEditorLanguage>().TriggerNotification;
+            }
+            if (Is(TriggerConfig.TypeSchedule))
+            {
+                return "⏱ " + Texts.Get<IRecipeEditorLanguage>().TriggerSchedule;
+            }
+            if (Is(TriggerConfig.TypeManual))
+            {
+                return "▶ " + Texts.Get<IRecipeEditorLanguage>().TriggerManual;
+            }
+            return t.Name ?? t.TriggerType;
+        }
+
+        public bool CanUnload => IsExtension ? HasFilePath : !IsBuiltIn || IsOverridden;
+        public string UnloadButtonText => IsOverridden ? Texts.Get<IRecipeEditorLanguage>().BtnResetDefault : Texts.Get<IRecipeEditorLanguage>().BtnUnload;
+        public string UnloadToolTip => IsOverridden
+            ? Texts.Get<IRecipeEditorLanguage>().TooltipResetDefault
+            : Texts.Get<IRecipeEditorLanguage>().TooltipUnload;
+
+        public ICommand ToggleActiveCommand { get; }
+        public ICommand EditCommand { get; private set; }
+        public ICommand UnloadCommand { get; }
+        public ICommand TestRunCommand { get; private set; }
+
+        /// <summary>
+        /// Shows the approval of the recipe file again: which triggers are switched on and which permissions are given
+        /// </summary>
+        public ICommand ReviewApprovalCommand { get; }
+
+        /// <summary>
+        /// Shows what the recipe does, its triggers, its approval and the changes against the built-in recipe it replaces
+        /// </summary>
+        public ICommand DetailsCommand { get; }
+
+        private void ExecuteShowDetails()
+        {
+            _recipeManager?.ShowRecipeDetails(Recipe.Id);
+        }
+
+        private void ExecuteReviewApproval()
+        {
+            if (!HasFilePath || _recipeManager == null) return;
+            var result = _recipeManager.ReviewApproval(Recipe.Id);
+            if (result != null && !result.IsValid)
+            {
+                ThemedMessageBox.Show(string.Join("\n", result.Errors), Texts.Get<IRecipeEditorLanguage>().TitleRecipePermissions, MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            _onRecipeChanged?.Invoke();
+        }
+
+        private void ExecuteUnload()
+        {
+            if (!CanUnload) return;
+
+            string confirmTitle = IsOverridden ? Texts.Get<IRecipeEditorLanguage>().TitleResetRecipe : Texts.Get<IRecipeEditorLanguage>().TitleUnloadRecipe;
+            string confirmMsg = IsOverridden
+                ? string.Format(Texts.Get<IRecipeEditorLanguage>().ConfirmResetRecipe, Name)
+                : string.Format(Texts.Get<IRecipeEditorLanguage>().ConfirmUnloadRecipe, Name);
+
+            if (ThemedMessageBox.Show(confirmMsg, confirmTitle, MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            if (IsExtension)
+            {
+                _recipeManager?.UnregisterExtension(Extension.Id);
+            }
+            else if (IsOverridden)
+            {
+                _recipeManager?.ResetToDefault(Recipe.Id);
+            }
+            else
+            {
+                _recipeManager?.UnregisterRecipe(Recipe.Id);
+            }
+
+            _onRecipeChanged?.Invoke();
+        }
+
+        private async Task ExecuteTestRunAsync()
+        {
+            var valResult = RecipeValidator.Validate(Recipe);
+            if (!valResult.IsValid)
+            {
+                ThemedMessageBox.Show(Texts.Get<IRecipeEditorLanguage>().ErrorTestRunValidation + "\n\n" + string.Join("\n", valResult.Errors), Texts.Get<IRecipeEditorLanguage>().TitleValidationError, MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            try
+            {
+                var result = await TestRun.RunAsync(Recipe);
+                string error = TestRun.ErrorOf(result);
+                if (error != null)
+                {
+                    throw new InvalidOperationException(error, result.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                ThemedMessageBox.Show(Texts.Get<IRecipeEditorLanguage>().ErrorExecution + "\n" + ex.Message, Texts.Get<IRecipeEditorLanguage>().TitleExecutionError, MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+    }
+
+    public class RecipeManagerViewModel : ViewModelBase
+    {
+        private static readonly log4net.ILog Log = log4net.LogManager.GetLogger(typeof(RecipeManagerViewModel));
+        private readonly IRecipeManager _recipeManager;
+        private readonly ICapturePipeline _pipeline;
+        private readonly Action<CaptureRecipe> _onSelectRecipeForEditor;
+        private readonly Action _onNewRecipeRequested;
+        private string _searchText = "";
+        private string _selectedFilterCategory = "All";
+        private RecipeManagerItemViewModel _selectedRecipe;
+        private string _statusMessage = "";
+
+        public ObservableCollection<RecipeManagerItemViewModel> AllRecipes { get; } = new ObservableCollection<RecipeManagerItemViewModel>();
+        public ObservableCollection<RecipeManagerItemViewModel> FilteredRecipes { get; } = new ObservableCollection<RecipeManagerItemViewModel>();
+
+        /// <summary>
+        /// The automatic steps (recipe extensions), a group of their own under the recipes
+        /// </summary>
+        public ObservableCollection<RecipeManagerItemViewModel> AllExtensions { get; } = new ObservableCollection<RecipeManagerItemViewModel>();
+        public ObservableCollection<RecipeManagerItemViewModel> FilteredExtensions { get; } = new ObservableCollection<RecipeManagerItemViewModel>();
+
+        public bool HasFilteredExtensions => FilteredExtensions.Count > 0;
+
+        private readonly Action<RecipeExtension> _onEditExtension;
+
+        public event Action RequestClose;
+
+        public RecipeManagerViewModel(
+            IRecipeManager recipeManager = null,
+            ICapturePipeline pipeline = null,
+            Action<CaptureRecipe> onSelectRecipeForEditor = null,
+            Action onNewRecipeRequested = null,
+            Action<RecipeExtension> onEditExtension = null,
+            IRecipeCatalog catalog = null)
+        {
+            _onEditExtension = onEditExtension;
+            _catalog = catalog ?? SimpleServiceProvider.Current?.GetInstance<IRecipeCatalog>(isOptional: true);
+            _recipeManager = recipeManager ?? SimpleServiceProvider.Current?.GetInstance<IRecipeManager>(isOptional: true);
+            _pipeline = pipeline ?? SimpleServiceProvider.Current?.GetInstance<ICapturePipeline>(isOptional: true);
+            _onSelectRecipeForEditor = onSelectRecipeForEditor;
+            _onNewRecipeRequested = onNewRecipeRequested;
+
+            LoadRecipeFromFileCommand = new RelayCommand(ExecuteLoadRecipeFromFile);
+            CreateNewRecipeCommand = new RelayCommand(ExecuteCreateNewRecipe);
+            ReloadAllCommand = new RelayCommand(ExecuteReloadAll);
+            ResetAllCommand = new RelayCommand(ExecuteResetAll, () => AllRecipes.Any(r => r.IsOverridden));
+            CloseCommand = new RelayCommand(() => RequestClose?.Invoke());
+            GetMoreRecipesCommand = new RelayCommand(ExecuteGetMoreRecipes);
+            CheckCatalogUpdatesCommand = new RelayCommand(() => AsyncCommand.Run(CheckCatalogUpdatesAsync, "Check the recipes from the catalog for updates"), () => !_isCheckingCatalog);
+
+            LoadRecipes();
+        }
+
+        public string SearchText
+        {
+            get => _searchText;
+            set
+            {
+                if (SetField(ref _searchText, value))
+                {
+                    ApplyFilter();
+                }
+            }
+        }
+
+        public string SelectedFilterCategory
+        {
+            get => _selectedFilterCategory;
+            set
+            {
+                if (SetField(ref _selectedFilterCategory, value))
+                {
+                    ApplyFilter();
+                }
+            }
+        }
+
+        public RecipeManagerItemViewModel SelectedRecipe
+        {
+            get => _selectedRecipe;
+            set => SetField(ref _selectedRecipe, value);
+        }
+
+        public string StatusMessage
+        {
+            get => _statusMessage;
+            set => SetField(ref _statusMessage, value);
+        }
+
+        public int TotalCount => AllRecipes.Count;
+        public int ActiveCount => AllRecipes.Count(r => r.IsEnabled);
+        public int DeactivatedCount => AllRecipes.Count(r => !r.IsEnabled);
+
+        public ICommand LoadRecipeFromFileCommand { get; }
+        public ICommand CreateNewRecipeCommand { get; }
+        public ICommand ReloadAllCommand { get; }
+
+        /// <summary>
+        /// Brings back every built-in recipe a file replaces
+        /// </summary>
+        public ICommand ResetAllCommand { get; }
+
+        private void ExecuteResetAll()
+        {
+            var replaced = AllRecipes.Where(r => r.IsOverridden).Select(r => r.Name).ToList();
+            if (replaced.Count == 0) return;
+            if (ThemedMessageBox.Show(Texts.Get<IRecipeEditorLanguage>().ConfirmResetAll + "\n\n" + string.Join("\n", replaced), Texts.Get<IRecipeEditorLanguage>().TitleResetAll,
+                    MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            {
+                return;
+            }
+            _recipeManager?.ResetAllToDefault();
+            LoadRecipes();
+        }
+        public ICommand CloseCommand { get; }
+
+        /// <summary>
+        /// The recipe catalog on getgreenshot.org, with the recipes this Greenshot can use
+        /// </summary>
+        public const string RecipeCatalogUrl = "https://getgreenshot.org/recipes/?from=greenshot&version=";
+
+        /// <summary>
+        /// Opens the recipe catalog on the website, where a recipe is installed with its Install button
+        /// </summary>
+        public ICommand GetMoreRecipesCommand { get; }
+
+        /// <summary>
+        /// The catalog is a beta feature, and the administrator can switch off installing from it
+        /// </summary>
+        public bool CanGetMoreRecipes => IniConfigRegistry.TryGetSection<ICoreConfiguration>(out var coreConfiguration) && coreConfiguration.IsBetaTester &&
+                                         RecipeConfigHelper.TryGetRecipeConfiguration()?.AllowCatalogInstall == true;
+
+        private void ExecuteGetMoreRecipes()
+        {
+            // The catalog filters by the file version (1.4.123), the assembly version is only 1.4.0.0
+            string url = _catalog?.CatalogUrl ?? RecipeCatalogUrl + Uri.EscapeDataString(typeof(EnvironmentInfo).Assembly.GetName().Version?.ToString(3) ?? string.Empty);
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"Couldn't open {url}", ex);
+            }
+        }
+
+        private readonly IRecipeCatalog _catalog;
+        private bool _isCheckingCatalog;
+
+        /// <summary>
+        /// Recipes from the catalog are installed (also ones which can't be loaded), and the catalog may be used
+        /// </summary>
+        public bool CanCheckCatalogUpdates => _catalog?.CanCheckForUpdates == true;
+
+        /// <summary>
+        /// Compares the installed recipes from the catalog with the catalog
+        /// </summary>
+        public ICommand CheckCatalogUpdatesCommand { get; }
+
+        /// <summary>
+        /// The recipes from the catalog with another version there, or which aren't loaded; filled by <see cref="CheckCatalogUpdatesCommand"/>
+        /// </summary>
+        public ObservableCollection<CatalogRecipeItemViewModel> CatalogRecipes { get; } = new ObservableCollection<CatalogRecipeItemViewModel>();
+
+        public bool HasCatalogRecipes => CatalogRecipes.Count > 0;
+
+        internal async Task CheckCatalogUpdatesAsync()
+        {
+            if (_catalog == null || _isCheckingCatalog)
+            {
+                return;
+            }
+            _isCheckingCatalog = true;
+            CommandManager.InvalidateRequerySuggested();
+            StatusMessage = Texts.Get<IRecipeEditorLanguage>().ManagerCatalogChecking;
+            try
+            {
+                var check = await _catalog.CheckForUpdatesAsync();
+                CatalogRecipes.Clear();
+                foreach (var status in check.Recipes ?? Array.Empty<RecipeCatalogStatus>())
+                {
+                    CatalogRecipes.Add(new CatalogRecipeItemViewModel(status, () => AsyncCommand.Run(() => UpdateFromCatalogAsync(status.Id), $"Update the recipe '{status.Id}' from the catalog")));
+                }
+                OnPropertyChanged(nameof(HasCatalogRecipes));
+                StatusMessage = check.Error ?? (CatalogRecipes.Any(r => r.Status.HasUpdate) ? string.Empty : Texts.Get<IRecipeEditorLanguage>().ManagerCatalogUpToDate);
+            }
+            finally
+            {
+                _isCheckingCatalog = false;
+                CommandManager.InvalidateRequerySuggested();
+            }
+        }
+
+        private async Task UpdateFromCatalogAsync(string recipeId)
+        {
+            if (_catalog == null || !await _catalog.UpdateAsync(recipeId))
+            {
+                return;
+            }
+            LoadRecipes();
+            await CheckCatalogUpdatesAsync();
+        }
+
+        public void LoadRecipes()
+        {
+            AllRecipes.Clear();
+            var recipes = _recipeManager?.GetAllRecipes() ?? Array.Empty<CaptureRecipe>();
+
+            foreach (var recipe in recipes)
+            {
+                var item = new RecipeManagerItemViewModel(
+                    recipe,
+                    _recipeManager,
+                    _pipeline,
+                    r =>
+                    {
+                        _onSelectRecipeForEditor?.Invoke(r);
+                        RequestClose?.Invoke();
+                    },
+                    () =>
+                    {
+                        LoadRecipes();
+                    });
+
+                AllRecipes.Add(item);
+            }
+
+            AllExtensions.Clear();
+            foreach (var extension in (_recipeManager?.GetAllExtensions() ?? Array.Empty<RecipeExtension>()).OrderBy(e => e.Extends?.Order ?? 0).ThenBy(e => e.Id, StringComparer.OrdinalIgnoreCase))
+            {
+                AllExtensions.Add(new RecipeManagerItemViewModel(
+                    extension,
+                    _recipeManager,
+                    _pipeline,
+                    _onEditExtension == null ? (Action<RecipeExtension>)null : e =>
+                    {
+                        _onEditExtension(e);
+                        RequestClose?.Invoke();
+                    },
+                    LoadRecipes));
+            }
+
+            ApplyFilter();
+            UpdateStats();
+            OnPropertyChanged(nameof(CanCheckCatalogUpdates));
+        }
+
+        private void ApplyFilter()
+        {
+            FilteredRecipes.Clear();
+            FilteredExtensions.Clear();
+            string query = _searchText?.Trim() ?? "";
+
+            foreach (var item in AllRecipes.Concat(AllExtensions))
+            {
+                // Category filter
+                bool categoryMatch = _selectedFilterCategory switch
+                {
+                    "Active" => item.IsEnabled,
+                    "Deactivated" => !item.IsEnabled,
+                    "Built-in" => item.IsBuiltIn && !item.IsOverridden,
+                    "Custom" => !item.IsBuiltIn || item.IsOverridden,
+                    "AI" => item.IsAiCreated,
+                    _ => true
+                };
+
+                if (!categoryMatch) continue;
+
+                // Search query filter
+                if (!string.IsNullOrEmpty(query))
+                {
+                    bool queryMatch = item.Name.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                      item.Id.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                      item.Description.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                      item.TriggersSummary.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                      (item.FilePath != null && item.FilePath.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0);
+
+                    if (!queryMatch) continue;
+                }
+
+                (item.IsExtension ? FilteredExtensions : FilteredRecipes).Add(item);
+            }
+            OnPropertyChanged(nameof(HasFilteredExtensions));
+
+            if (SelectedRecipe == null && FilteredRecipes.Count > 0)
+            {
+                SelectedRecipe = FilteredRecipes[0];
+            }
+        }
+
+        private void UpdateStats()
+        {
+            OnPropertyChanged(nameof(TotalCount));
+            OnPropertyChanged(nameof(ActiveCount));
+            OnPropertyChanged(nameof(DeactivatedCount));
+        }
+
+        private void ExecuteLoadRecipeFromFile()
+        {
+            string recipeFile = FileDialogs.PickFileToOpen(IntPtr.Zero, RecipeSerializer.RecipeFileFilter, Texts.Get<IRecipeEditorLanguage>().TitleLoadRecipe);
+            if (recipeFile != null)
+            {
+                try
+                {
+                    if (_recipeManager == null)
+                    {
+                        var recipe = RecipeSerializer.LoadFromFile(recipeFile);
+                        recipe.FilePath = recipeFile;
+                        var valResult = RecipeValidator.Validate(recipe);
+                        if (!valResult.IsValid)
+                        {
+                            ThemedMessageBox.Show(Texts.Get<IRecipeEditorLanguage>().ErrorRecipeValidation + "\n\n" + string.Join("\n", valResult.Errors), Texts.Get<IRecipeEditorLanguage>().TitleValidationError, MessageBoxButton.OK, MessageBoxImage.Warning);
+                            return;
+                        }
+                        _onSelectRecipeForEditor?.Invoke(recipe);
+                        StatusMessage = string.Format(Texts.Get<IRecipeEditorLanguage>().StatusLoaded, Path.GetFileName(recipeFile));
+                        RequestClose?.Invoke();
+                        return;
+                    }
+
+                    var result = _recipeManager.LoadRecipeFromFile(recipeFile);
+                    if (!result.IsValid)
+                    {
+                        ThemedMessageBox.Show(Texts.Recipe.ImportFailed + "\n\n" + string.Join("\n", result.Errors), Texts.Get<IRecipeEditorLanguage>().TitleValidationError, MessageBoxButton.OK, MessageBoxImage.Warning);
+                        StatusMessage = string.Format(Texts.Get<IRecipeEditorLanguage>().StatusValidationFailed, Path.GetFileName(recipeFile));
+                    }
+                    else
+                    {
+                        StatusMessage = string.Format(Texts.Get<IRecipeEditorLanguage>().StatusLoadedRegistered, Path.GetFileName(recipeFile));
+                        LoadRecipes();
+
+                        // Select the newly loaded recipe in the list
+                        var newlyLoaded = AllRecipes.FirstOrDefault(r => string.Equals(r.FilePath, recipeFile, StringComparison.OrdinalIgnoreCase));
+                        if (newlyLoaded != null)
+                        {
+                            SelectedRecipe = newlyLoaded;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ThemedMessageBox.Show(Texts.Recipe.ImportFailed + "\n" + ex.Message, Texts.Get<IRecipeEditorLanguage>().TitleErrorLoadingRecipe, MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
+        private void ExecuteCreateNewRecipe()
+        {
+            _onNewRecipeRequested?.Invoke();
+            RequestClose?.Invoke();
+        }
+
+        private void ExecuteReloadAll()
+        {
+            _recipeManager?.ReloadRecipes();
+            LoadRecipes();
+            StatusMessage = Texts.Get<IRecipeEditorLanguage>().StatusReloaded;
+        }
+    }
+}

@@ -1,15 +1,32 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
   <PropertyGroup>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
   </PropertyGroup>
+    <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+      <DebugType>none</DebugType>
+      <DebugSymbols>false</DebugSymbols>
+    </PropertyGroup>
   <ItemGroup>
-    <None Include="Languages\language*.xml">
+    <None Include="Languages\greenshot*.ini">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="SixLabors.ImageSharp" Version="2.1.13" />
+    <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="1.0.0" />
+    <PackageReference Include="Dapplo.Windows.Imaging" Version="3.26.3" />
+    <!-- SecurityAccessDeniedException of the .greenshot type check -->
+    <Reference Include="System.ServiceModel" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Greenshot.Base\Greenshot.Base.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>Greenshot.Tests</_Parameter1>
+    </AssemblyAttribute>
   </ItemGroup>
 
   <ItemGroup>
@@ -20,9 +37,6 @@
       <SubType>Component</SubType>
     </Compile>
     <Compile Update="Controls\BindableToolStripDropDownButton.cs">
-      <SubType>Component</SubType>
-    </Compile>
-    <Compile Update="Controls\ColorButton.cs">
       <SubType>Component</SubType>
     </Compile>
     <Compile Update="Controls\FontFamilyComboBox.cs">
@@ -46,42 +60,71 @@
     <Compile Update="Controls\ToolStripNumericUpDown.cs">
       <SubType>Component</SubType>
     </Compile>
-    <Compile Update="Drawing\Surface.cs">
-      <SubType>Component</SubType>
-    </Compile>
-    <Compile Update="Forms\ColorDialog.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Update="Forms\ColorPickerToolStripButton.cs">
-      <SubType>Component</SubType>
-    </Compile>
-    <Compile Update="Forms\DropShadowSettingsForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
     <Compile Update="Forms\EditorForm.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Update="Forms\ImageEditorForm.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Update="Forms\MovableShowColorForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Update="Forms\ResizeSettingsForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Update="Forms\TornEdgeSettingsForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Update="Forms\ColorDialog.resx">
-      <SubType>Designer</SubType>
-      <DependentUpon>ColorDialog.cs</DependentUpon>
-    </EmbeddedResource>
     <EmbeddedResource Update="Forms\ImageEditorForm.resx">
       <DependentUpon>ImageEditorForm.cs</DependentUpon>
     </EmbeddedResource>
+  </ItemGroup>
+
+  <!-- The images of the ImageEditorForm, these are loaded with EmbeddedResources (not from the .resx, which would need System.Resources.Extensions).
+       The name of each resource is "Greenshot.Editor.Forms.ImageEditorForm." followed by the name the designer uses, e.g. "btnSave.Image" -->
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\*.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.%(Filename)" />
+    <EmbeddedResource Include="icons\notification-counter-01.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel01.Image" />
+    <EmbeddedResource Include="icons\notification-counter-02.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel02.Image" />
+    <EmbeddedResource Include="icons\notification-counter-03.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel03.Image" />
+    <EmbeddedResource Include="icons\notification-counter-04.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel04.Image" />
+    <EmbeddedResource Include="icons\notification-counter-05.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel05.Image" />
+    <EmbeddedResource Include="icons\notification-counter-06.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel06.Image" />
+    <EmbeddedResource Include="icons\notification-counter-07.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel07.Image" />
+    <EmbeddedResource Include="icons\notification-counter-08.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel08.Image" />
+    <EmbeddedResource Include="icons\notification-counter-09.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel09.Image" />
+    <EmbeddedResource Include="icons\notification-counter-10.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel10.Image" />
+    <EmbeddedResource Include="icons\notification-counter-11.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel11.Image" />
+    <EmbeddedResource Include="icons\notification-counter-12.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel12.Image" />
+    <EmbeddedResource Include="icons\notification-counter-13.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel13.Image" />
+    <EmbeddedResource Include="icons\notification-counter-14.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel14.Image" />
+    <EmbeddedResource Include="icons\notification-counter-15.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel15.Image" />
+    <EmbeddedResource Include="icons\notification-counter-16.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel16.Image" />
+    <EmbeddedResource Include="icons\notification-counter-17.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel17.Image" />
+    <EmbeddedResource Include="icons\notification-counter-18.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel18.Image" />
+    <EmbeddedResource Include="icons\notification-counter-19.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel19.Image" />
+    <EmbeddedResource Include="icons\notification-counter-20-plus.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel20+.Image" />
+    <EmbeddedResource Include="icons\notification-counter-20.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnStepLabel20.Image" />
+    <EmbeddedResource Include="icons\balloon.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnSpeechBubble.Image" />
+    <EmbeddedResource Include="icons\resize.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.btnResize.Image" />
+    <EmbeddedResource Include="icons\arrow-resize-090.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.Fit-height.Image" />
+    <EmbeddedResource Include="icons\arrow-resize.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.Fit-width.Image" />
+    <EmbeddedResource Include="icons\fill-down.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.PushOut-Bottom.Image" />
+    <EmbeddedResource Include="icons\fill-left.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.PushOut-Left.Image" />
+    <EmbeddedResource Include="icons\fill-right.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.PushOut-Right.Image" />
+    <EmbeddedResource Include="icons\fill-up.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.PushOut-Top.Image" />
+    <EmbeddedResource Include="icons\application-dock-270.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.Snap-bottom.Image" />
+    <EmbeddedResource Include="icons\application-dock-180.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.Snap-left.Image" />
+    <EmbeddedResource Include="icons\application-dock.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.Snap-right.Image" />
+    <EmbeddedResource Include="icons\application-dock-090.png" LogicalName="Greenshot.Editor.Forms.ImageEditorForm.Snap-top.Image" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Twemoji Mozilla as WOFF (zlib, SixLabors.Fonts reads it; its .NET Framework build has no Brotli for WOFF2), without glyph names (post format 3) -->
+    <ContentWithTargetPath Include="Drawing\Emoji\Twemoji.Mozilla.woff">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>Twemoji.Mozilla.woff</TargetPath>
+    </ContentWithTargetPath>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Update="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" />
+    <PackageReference Update="System.Text.Encoding.CodePages" Version="11.0.0">
+      <IncludeAssets>compile; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 </Project>

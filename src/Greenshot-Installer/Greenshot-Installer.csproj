@@ -1,0 +1,109 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <Target Name="CoreCompile" />
+  <PropertyGroup>
+    <SkipCopyBuildProduct>true</SkipCopyBuildProduct>
+  </PropertyGroup>
+  
+  <ItemGroup>
+    <PackageReference Include="Tools.InnoSetup" Version="7.1.1" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <PackageReference Update="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" />
+    <PackageReference Update="System.Text.Encoding.CodePages" Version="11.0.0">
+      <IncludeAssets>compile; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  
+  <Target Name="GenerateSbom" BeforeTargets="Generate hashes" DependsOnTargets="PrunePluginFiles;SignFiles" Condition="'$(Configuration)' == 'Release'">
+    <PropertyGroup>
+      <SbomVersion Condition="'$(NuGetPackageVersion)' != ''">$(NuGetPackageVersion)</SbomVersion>
+      <SbomVersion Condition="'$(SbomVersion)' == ''">$(BuildVersionSimple)</SbomVersion>
+      <SbomVersion Condition="'$(SbomVersion)' == ''">1.0.0</SbomVersion>
+    </PropertyGroup>
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;&amp; '$(MSBuildThisFileDirectory)scripts\generate-sboms.ps1' -SolutionDir '$(SolutionDir)' -Configuration '$(Configuration)' -TargetFramework '$(TargetFramework)' -SbomVersion '$(SbomVersion)'&quot;" StdOutEncoding="UTF-8" StdErrEncoding="UTF-8" />
+    <ItemGroup>
+      <SpdxManifestFiles Include="$(SolutionDir)Greenshot\bin\$(Configuration)\$(TargetFramework)\_manifest\**\manifest.spdx.json*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(SpdxManifestFiles)" DestinationFolder="$(SolutionDir)Greenshot\bin\$(Configuration)\$(TargetFramework)" />
+    <RemoveDir Directories="$(SolutionDir)Greenshot\bin\$(Configuration)\$(TargetFramework)\_manifest" />
+  </Target>
+
+  <!-- Makes the output directory the layout of an installation: removes the plugins' copies of files in the main directory.
+       Like everything for the release (checksums, SBOM, Greenshot Light, signing, installers), only in Release. -->
+  <Target Name="PrunePluginFiles" BeforeTargets="PostBuildEvent" Condition="'$(Configuration)' == 'Release'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)scripts\prune-plugin-files.ps1&quot; -OutputDir &quot;$(SolutionDir)Greenshot\bin\$(Configuration)\$(TargetFramework)&quot;" />
+  </Target>
+
+  <!-- greenshot-mcp.exe is published after everything else (see PublishMcpServer): remove the one of a previous build, so it isn't in the checksums, the SBOM or the installers -->
+  <Target Name="RemovePreviousMcpServer" BeforeTargets="PrunePluginFiles" Condition="'$(Configuration)' == 'Release'">
+    <Delete Files="$(SolutionDir)Greenshot\bin\$(Configuration)\$(TargetFramework)\greenshot-mcp.exe" />
+  </Target>
+
+  <!-- Signs the unsigned exe and dll files before the SBOM and the checksums are made, so Smart App Control does not block them -->
+  <Target Name="SignFiles" DependsOnTargets="PrunePluginFiles" Condition="'$(Configuration)' == 'Release' and '$(CertumThumbprint)' != ''">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)scripts\sign-files.ps1&quot; -OutputDir &quot;$(SolutionDir)Greenshot\bin\$(Configuration)\$(TargetFramework)&quot; -Thumbprint &quot;$(CertumThumbprint)&quot;" />
+  </Target>
+
+  <Target Name="Generate hashes" BeforeTargets="PostBuildEvent" DependsOnTargets="PrunePluginFiles;SignFiles" Condition="'$(Configuration)' == 'Release'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)scripts\generate-checksums.ps1&quot; -OutputDir &quot;$(SolutionDir)Greenshot\bin\$(Configuration)\$(TargetFramework)&quot;" />
+  </Target>
+
+  <UsingTask TaskName="SetEnvironmentVariableTask" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Name ParameterType="System.String" Required="true" />
+      <Value ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Code Type="Fragment" Language="cs">
+        <![CDATA[
+        Environment.SetEnvironmentVariable(Name, Value);
+      ]]>
+      </Code>
+    </Task>
+  </UsingTask>
+  
+  <!--
+    Greenshot Light: Greenshot.exe built once more with /p:GreenshotEdition=Light (see Greenshot.csproj), the basics only: no plugins,
+    no AI tools, no browser extension, no toasts, and without greenshot-cli.exe and greenshot-proxy.exe (Light opens the files of the
+    file types the installer registers with Greenshot.exe). It goes to bin\$(Configuration)-Light with its own checksum.SHA256;
+    setup-light.iss and the Light portable version use it.
+  -->
+  <Target Name="BuildLightEdition" Condition="'$(Configuration)' == 'Release'">
+    <PropertyGroup>
+      <LightOutputDir>$(SolutionDir)Greenshot\bin\$(Configuration)-Light\$(TargetFramework)</LightOutputDir>
+    </PropertyGroup>
+    <MSBuild Projects="$(SolutionDir)Greenshot\Greenshot.csproj" Targets="Build" Properties="Configuration=$(Configuration);GreenshotEdition=Light" />
+    <!-- Earlier builds copied them there -->
+    <Delete Files="$(LightOutputDir)\greenshot-cli.exe;$(LightOutputDir)\greenshot-proxy.exe" />
+    <Exec Condition="'$(CertumThumbprint)' != ''" Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)scripts\sign-files.ps1&quot; -OutputDir &quot;$(LightOutputDir)&quot; -Thumbprint &quot;$(CertumThumbprint)&quot;" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)scripts\generate-checksums.ps1&quot; -OutputDir &quot;$(LightOutputDir)&quot;" />
+  </Target>
+
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent" DependsOnTargets="BuildLightEdition" Condition="'$(Configuration)' == 'Release'">
+    <SetEnvironmentVariableTask Name="BuildVersionSimple" Value="$(BuildVersionSimple)" />
+    <SetEnvironmentVariableTask Name="BuildVersionEnhanced" Value="$(NuGetPackageVersion)" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)scripts\check-core-files.ps1&quot; -OutputDir &quot;$(SolutionDir)Greenshot\bin\$(Configuration)\$(TargetFramework)&quot; -CoreFilesIss &quot;$(MSBuildThisFileDirectory)includes\core-files.iss&quot;" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)scripts\check-core-files.ps1&quot; -OutputDir &quot;$(SolutionDir)Greenshot\bin\$(Configuration)-Light\$(TargetFramework)&quot; -CoreFilesIss &quot;$(MSBuildThisFileDirectory)includes\core-files.iss&quot; -Light" />
+    <Exec Command="echo Building installer" />
+    <Exec Command="$(PkgTools_InnoSetup)\tools\ISCC.exe -q $(SolutionDir)$(ProjectName)\setup.iss" />
+    <Exec Command="echo Building light-installer" />
+    <Exec Command="$(PkgTools_InnoSetup)\tools\ISCC.exe -q $(SolutionDir)$(ProjectName)\setup-light.iss" />
+    <!-- The portable versions (full and light), as the release workflow creates them -->
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)scripts\create-portable-zips.ps1&quot; -RepositoryRootPath &quot;$(SolutionDir)..&quot; -BuildArtifactsPath &quot;$(SolutionDir)Greenshot\bin\$(Configuration)\$(TargetFramework)&quot; -LightBuildArtifactsPath &quot;$(SolutionDir)Greenshot\bin\$(Configuration)-Light\$(TargetFramework)&quot; -InstallerDir &quot;$(SolutionDir)..\installer&quot;" />
+  </Target>
+
+  <!--
+    The MCP server (greenshot-mcp.exe, Native AOT, a single exe) as the very last step: next to Greenshot.exe for the release
+    download, but not in checksum.SHA256, the SBOM, the installers or the portable versions, which are made before.
+    Needs the C++ build tools of Visual Studio (see docs/vNext/mcp-server.md); skip it with /p:SkipMcpPublish=true.
+  -->
+  <Target Name="PublishMcpServer" AfterTargets="PostBuild" Condition="'$(Configuration)' == 'Release' and '$(SkipMcpPublish)' != 'true'">
+    <PropertyGroup>
+      <McpPublishDir>$(MSBuildThisFileDirectory)obj\mcp-publish\win-x64\</McpPublishDir>
+    </PropertyGroup>
+    <Exec Command="dotnet publish &quot;$(SolutionDir)Greenshot.Mcp\Greenshot.Mcp.csproj&quot; -c Release -r win-x64 -o &quot;$(McpPublishDir.TrimEnd('\'))&quot;" />
+    <Copy SourceFiles="$(McpPublishDir)greenshot-mcp.exe" DestinationFolder="$(SolutionDir)Greenshot\bin\$(Configuration)\$(TargetFramework)" />
+  </Target>
+</Project>

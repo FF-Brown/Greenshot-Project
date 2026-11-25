@@ -1,0 +1,288 @@
+<Window x:Class="Greenshot.Editor.Views.ColorPickerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wpf="clr-namespace:Greenshot.Base.Wpf;assembly=Greenshot.Base"
+        Title="{wpf:Text Core.ColorpickerTitle}"
+        SizeToContent="WidthAndHeight"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual"
+        Background="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=BackgroundBrush}"
+        Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=ForegroundBrush}"
+        WindowStyle="None"
+        AllowsTransparency="False">
+
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="36"
+                      CornerRadius="0"
+                      GlassFrameThickness="0"
+                      NonClientFrameEdges="None"
+                      ResizeBorderThickness="5"
+                      UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Greenshot.Base;component/Wpf/Styles/GreenshotStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+
+        <DrawingBrush x:Key="CheckerboardBrush" TileMode="Tile" Viewport="0,0,10,10" ViewportUnits="Absolute">
+            <DrawingBrush.Drawing>
+                <DrawingGroup>
+                    <GeometryDrawing Brush="#FFFFFF">
+                        <GeometryDrawing.Geometry>
+                            <RectangleGeometry Rect="0,0,10,10" />
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                    <GeometryDrawing Brush="#CCCCCC">
+                        <GeometryDrawing.Geometry>
+                            <GeometryGroup>
+                                <RectangleGeometry Rect="0,0,5,5" />
+                                <RectangleGeometry Rect="5,5,5,5" />
+                            </GeometryGroup>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                </DrawingGroup>
+            </DrawingBrush.Drawing>
+        </DrawingBrush>
+
+        <Style TargetType="Label">
+            <Setter Property="Foreground" Value="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=ForegroundBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Padding" Value="0,2"/>
+            <Setter Property="FontSize" Value="{wpf:FontSize 11}"/>
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=ControlBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=ForegroundBrush}"/>
+            <Setter Property="BorderBrush" Value="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=BorderBrush}"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Height" Value="22"/>
+            <Setter Property="FontSize" Value="{wpf:FontSize 11}"/>
+            <Setter Property="Padding" Value="4,0"/>
+        </Style>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Border BorderBrush="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=BorderBrush}"
+            BorderThickness="1">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="36"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Custom Title Bar -->
+            <Grid Grid.Row="0" 
+                  Background="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=TitleBarBrush}"
+                  MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="36"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <Image Grid.Column="0" 
+                       Source="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=Icon}"
+                       Width="16" Height="16"
+                       Margin="10,0,0,0"
+                       VerticalAlignment="Center"
+                       WindowChrome.IsHitTestVisibleInChrome="False"/>
+
+                <TextBlock Grid.Column="1"
+                           Text="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=Title}"
+                           Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=ForegroundBrush}"
+                           VerticalAlignment="Center"
+                           Margin="8,0,0,0"
+                           FontSize="{wpf:FontSize 13}"
+                           FontWeight="SemiBold"
+                           WindowChrome.IsHitTestVisibleInChrome="False"/>
+
+                <Button Grid.Column="2"
+                        Click="CloseButton_Click"
+                        Style="{StaticResource TitleCloseButtonStyle}"
+                        ToolTip="{wpf:Text Core.AccessibleClose}"
+                        WindowChrome.IsHitTestVisibleInChrome="True"/>
+            </Grid>
+
+            <!-- Main Content -->
+            <Grid Grid.Row="1" Margin="10,8,10,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="12"/>
+                    <ColumnDefinition Width="140"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left: Palette and Recent Colors -->
+                <Grid Grid.Column="0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="8"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="4"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Palette Grid (13 cols x 11 rows) -->
+                    <!-- Tab enters the palette once, the arrow keys move between the colors -->
+                    <UniformGrid x:Name="PaletteGrid" Grid.Row="0" Columns="13" Rows="11"
+                                 KeyboardNavigation.TabNavigation="Once" KeyboardNavigation.DirectionalNavigation="Contained" />
+
+                    <!-- Recent Colors Label -->
+                    <TextBlock Grid.Row="2" x:Name="RecentColorsLabel"
+                               Text="{wpf:Text Core.ColorpickerRecentcolors}"
+                               Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=ForegroundBrush}"
+                               FontSize="{wpf:FontSize 11}"
+                               FontWeight="SemiBold"/>
+
+                    <!-- Recent Colors Row (12 swatches) -->
+                    <UniformGrid x:Name="RecentColorsGrid" Grid.Row="4" Columns="12" Rows="1"
+                                 KeyboardNavigation.TabNavigation="Once" KeyboardNavigation.DirectionalNavigation="Contained"
+                                 AutomationProperties.LabeledBy="{Binding ElementName=RecentColorsLabel}" />
+                </Grid>
+
+                <!-- Separator line -->
+                <Rectangle Grid.Column="1" Width="1"
+                           Fill="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=BorderBrush}"
+                           HorizontalAlignment="Center"
+                           Margin="0,2"/>
+
+                <!-- Right: Inputs and Controls -->
+                <Grid Grid.Column="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="6"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="6"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="4"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="8"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Transparent Button -->
+                    <Button Grid.Row="0" x:Name="BtnTransparent"
+                            Content="{wpf:Text Core.ColorpickerTransparent}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Click="BtnTransparent_Click"/>
+
+                    <!-- Preview & Pipette -->
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="6"/>
+                            <ColumnDefinition Width="32"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Preview Box with checkerboard background -->
+                        <Grid Grid.Column="0" Height="28">
+                            <Border Background="{StaticResource CheckerboardBrush}"
+                                    BorderBrush="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="2"/>
+                            <Border x:Name="PreviewColorBorder"
+                                    BorderBrush="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="2"/>
+                        </Grid>
+
+                        <!-- Pipette Button -->
+                        <Button Grid.Column="2" x:Name="BtnPipette"
+                                Height="28" Width="32"
+                                Padding="0"
+                                ToolTip="{wpf:Text Core.ColorpickerPipette}"
+                                AutomationProperties.Name="{wpf:Text Core.ColorpickerPipette}"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                PreviewMouseLeftButtonDown="BtnPipette_PreviewMouseLeftButtonDown">
+                            <Image x:Name="PipetteIcon" Width="16" Height="16"/>
+                        </Button>
+                    </Grid>
+
+                    <!-- HTML Color -->
+                    <TextBlock Grid.Row="4" x:Name="HtmlColorLabel"
+                               Text="{wpf:Text Core.ColorpickerHtmlcolor}"
+                               Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=ForegroundBrush}"
+                               FontSize="{wpf:FontSize 11}"/>
+                    <TextBox Grid.Row="6" x:Name="TextBoxHtml" AutomationProperties.LabeledBy="{Binding ElementName=HtmlColorLabel}"
+                             TextChanged="TextBoxHtml_TextChanged"
+                             GotFocus="TextBox_GotFocus"
+                             KeyDown="TextBox_KeyDown"/>
+
+                    <!-- RGBA Numerical Inputs -->
+                    <Grid Grid.Row="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="3"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="3"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="3"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="8"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Red -->
+                        <Label Grid.Row="0" Grid.Column="0" Content="{wpf:Text Core.ColorpickerRed}" Target="{Binding ElementName=TextBoxRed}"/>
+                        <TextBox Grid.Row="0" Grid.Column="1" x:Name="TextBoxRed"
+                                 Width="46" HorizontalAlignment="Right" TextAlignment="Right"
+                                 TextChanged="TextBoxRgb_TextChanged"
+                                 GotFocus="TextBox_GotFocus"
+                                 KeyDown="TextBox_KeyDown"/>
+
+                        <!-- Green -->
+                        <Label Grid.Row="2" Grid.Column="0" Content="{wpf:Text Core.ColorpickerGreen}" Target="{Binding ElementName=TextBoxGreen}"/>
+                        <TextBox Grid.Row="2" Grid.Column="1" x:Name="TextBoxGreen"
+                                 Width="46" HorizontalAlignment="Right" TextAlignment="Right"
+                                 TextChanged="TextBoxRgb_TextChanged"
+                                 GotFocus="TextBox_GotFocus"
+                                 KeyDown="TextBox_KeyDown"/>
+
+                        <!-- Blue -->
+                        <Label Grid.Row="4" Grid.Column="0" Content="{wpf:Text Core.ColorpickerBlue}" Target="{Binding ElementName=TextBoxBlue}"/>
+                        <TextBox Grid.Row="4" Grid.Column="1" x:Name="TextBoxBlue"
+                                 Width="46" HorizontalAlignment="Right" TextAlignment="Right"
+                                 TextChanged="TextBoxRgb_TextChanged"
+                                 GotFocus="TextBox_GotFocus"
+                                 KeyDown="TextBox_KeyDown"/>
+
+                        <!-- Alpha -->
+                        <Label Grid.Row="6" Grid.Column="0" Content="{wpf:Text Core.ColorpickerAlpha}" Target="{Binding ElementName=TextBoxAlpha}"/>
+                        <TextBox Grid.Row="6" Grid.Column="1" x:Name="TextBoxAlpha"
+                                 Width="46" HorizontalAlignment="Right" TextAlignment="Right"
+                                 TextChanged="TextBoxRgb_TextChanged"
+                                 GotFocus="TextBox_GotFocus"
+                                 KeyDown="TextBox_KeyDown"/>
+
+                        <!-- Actions: Apply & Cancel -->
+                        <Grid Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="4"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <Button Grid.Column="0" x:Name="BtnApply"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Content="{wpf:Text Core.ColorpickerApply}"
+                                    IsDefault="True"
+                                    Click="BtnApply_Click"/>
+
+                            <Button Grid.Column="2" x:Name="BtnCancel"
+                                    Content="{wpf:Text Core.Cancel}"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    IsCancel="True"
+                                    Click="BtnCancel_Click"/>
+                        </Grid>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

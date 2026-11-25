@@ -1,13 +1,13 @@
-﻿/*
+/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -21,7 +21,6 @@
 
 using System;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using Dapplo.Windows.Common.Structs;
 using Greenshot.Base.Core;
@@ -39,53 +38,15 @@ namespace Greenshot.Editor.Drawing.Filters
         {
         }
 
-        public override void Apply(Graphics graphics, Bitmap applyBitmap, NativeRect rect, RenderMode renderMode)
+        protected override void ApplyFilter(Graphics graphics, Bitmap applyBitmap, NativeRect applyRect, RenderMode renderMode)
         {
-            var applyRect = ImageHelper.CreateIntersectRectangle(applyBitmap.Size, rect, Invert);
-
-            if (applyRect.Width == 0 || applyRect.Height == 0)
-            {
-                // nothing to do
-                return;
-            }
-
-            GraphicsState state = graphics.Save();
-            if (Invert)
-            {
-                graphics.SetClip(applyRect);
-                graphics.ExcludeClip(rect);
-            }
-
-            ColorMatrix grayscaleMatrix = new ColorMatrix(new[]
-            {
-                new[]
-                {
-                    .3f, .3f, .3f, 0, 0
-                },
-                new[]
-                {
-                    .59f, .59f, .59f, 0, 0
-                },
-                new[]
-                {
-                    .11f, .11f, .11f, 0, 0
-                },
-                new float[]
-                {
-                    0, 0, 0, 1, 0
-                },
-                new float[]
-                {
-                    0, 0, 0, 0, 1
-                }
-            });
-            using (ImageAttributes ia = new ImageAttributes())
-            {
-                ia.SetColorMatrix(grayscaleMatrix);
-                graphics.DrawImage(applyBitmap, applyRect, applyRect.X, applyRect.Y, applyRect.Width, applyRect.Height, GraphicsUnit.Pixel, ia);
-            }
-
-            graphics.Restore(state);
+            // The luminance of BT.709 in linear light, like the grayscale effect and the HDR image
+            using Bitmap gray = ImageHelper.CloneArea(applyBitmap, applyRect, PixelFormat.Format32bppArgb);
+            ImageHelper.ApplyGrayscale(gray);
+            // Mirrored at the edges: when the editor zooms, GDI+ would mix the border pixels with transparency
+            using var attributes = new ImageAttributes();
+            attributes.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);
+            graphics.DrawImage(gray, applyRect, 0, 0, gray.Width, gray.Height, GraphicsUnit.Pixel, attributes);
         }
     }
 }

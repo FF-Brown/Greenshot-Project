@@ -1,13 +1,13 @@
 /*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  *
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
@@ -97,28 +97,12 @@ namespace Greenshot.Editor.Drawing
             bool lineVisible = lineThickness > 0 && Colors.IsVisible(lineColor);
             if (shadow && (lineVisible || Colors.IsVisible(fillColor)))
             {
-                //draw shadow first
-                int basealpha = 100;
-                int alpha = basealpha;
-                int steps = 5;
-                int currentStep = lineVisible ? 1 : 0;
-                while (currentStep <= steps)
+                DrawShadow(lineThickness, (alpha, currentStep, shadowPen, nil) =>
                 {
-                    using Pen shadowPen = new Pen(Color.FromArgb(alpha, 100, 100, 100))
-                    {
-                        Width = lineVisible ? lineThickness : 1
-                    };
-                    var shadowRect = new NativeRect(
-                        rect.Left + currentStep,
-                        rect.Top + currentStep,
-                        rect.Width,
-                        rect.Height).Normalize();
+                    var shadowRect = new NativeRect(rect.Left + currentStep, rect.Top + currentStep, rect.Width, rect.Height);
                     graphics.DrawRectangle(shadowPen, shadowRect);
-                    currentStep++;
-                    alpha -= basealpha / steps;
-                }
+                });
             }
-
 
             if (Colors.IsVisible(fillColor))
             {

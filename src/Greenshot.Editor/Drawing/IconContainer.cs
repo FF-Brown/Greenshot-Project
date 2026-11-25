@@ -1,13 +1,13 @@
 ﻿/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -73,16 +73,14 @@ namespace Greenshot.Editor.Drawing
             {
                 icon?.Dispose();
                 icon = (Icon) value.Clone();
-                Width = value.Width;
-                Height = value.Height;
             }
             get => icon;
         }
 
         /**
-		 * This Dispose is called from the Dispose and the Destructor.
-		 * When disposing==true all non-managed resources should be freed too!
-		 */
+         * This Dispose is called from the Dispose and the Destructor.
+         * When disposing==true all non-managed resources should be freed too!
+         */
         protected override void Dispose(bool disposing)
         {
             if (disposing)
@@ -103,6 +101,7 @@ namespace Greenshot.Editor.Drawing
 
             using Icon fileIcon = new Icon(filename);
             Icon = fileIcon;
+            ResetToDefaultSize();
             Log.Debug("Loaded file: " + filename + " with resolution: " + Height + "," + Width);
         }
 
@@ -115,6 +114,7 @@ namespace Greenshot.Editor.Drawing
 
             using Icon fileIcon = new Icon(iconStream);
             Icon = fileIcon;
+            ResetToDefaultSize();
             Log.Debug("Loaded stream: with resolution: " + Height + "," + Width);
         }
 

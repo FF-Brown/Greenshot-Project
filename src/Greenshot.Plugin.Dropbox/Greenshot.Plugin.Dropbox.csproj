@@ -1,15 +1,28 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
   <ItemGroup>
-    <None Include="Languages\language*.xml">
+    <None Include="Languages\greenshot*.ini">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Dropbox.gif" />
+    <EmbeddedResource Include="Images\Dropbox.gif" LogicalName="Greenshot.Plugin.Dropbox.Dropbox.gif" />
+    <!-- Loaded with EmbeddedResources.GetImage(typeof(DropboxPlugin), "Dropbox") -->
+    <EmbeddedResource Include="Images\Dropbox.png" LogicalName="Greenshot.Plugin.Dropbox.DropboxPlugin.Dropbox" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Greenshot.Base\Greenshot.Base.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Update="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" />
+    <PackageReference Update="System.Text.Encoding.CodePages" Version="11.0.0">
+      <IncludeAssets>compile; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 </Project>

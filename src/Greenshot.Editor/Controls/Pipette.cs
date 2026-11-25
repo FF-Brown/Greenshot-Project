@@ -1,13 +1,13 @@
 /*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -20,16 +20,14 @@
  */
 
 using System;
-using System.ComponentModel;
 using System.Drawing;
 using System.Windows.Forms;
 using Dapplo.Windows.Common.Structs;
 using Dapplo.Windows.Icons;
 using Dapplo.Windows.Icons.SafeHandles;
-using Dapplo.Windows.Messages.Enumerations;
+using Dapplo.Windows.Messages.Enums;
 using Dapplo.Windows.User32;
-using Greenshot.Editor.Forms;
-using ColorDialog = Greenshot.Editor.Forms.ColorDialog;
+using Greenshot.Editor.Views;
 
 namespace Greenshot.Editor.Controls
 {
@@ -39,7 +37,7 @@ namespace Greenshot.Editor.Controls
     /// </summary>
     public sealed class Pipette : Label, IMessageFilter, IDisposable
     {
-        private MovableShowColorForm _movableShowColorForm;
+        private MovableShowColorWindow _movableShowColorWindow;
         private bool _dragging;
         private Cursor _cursor;
         private readonly Bitmap _image;
@@ -47,14 +45,29 @@ namespace Greenshot.Editor.Controls
 
         public event EventHandler<PipetteUsedArgs> PipetteUsed;
 
+        private static readonly byte[] PipettePngBytes = Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAZdEVYdFNvZnR3YXJl" +
+            "AEFkb2JlIEltYWdlUmVhZHlxyWU8AAABqklEQVQ4T6WTvUtCURiH34MiKoo6CKI45HUT/4CgDwz8oMVFXLyGIVpDjTYkuDsoF6RPmtJK" +
+            "kIgKipYsCIoQihYXKxSCICjaGoTTe6R7uflBgcOPwz3wPL/3HM4FSikMkw6sVCphHPNCSE9auPf8kydCJuqEHNYIOakSMsXYjiClUPSF" +
+            "mVAUiHBbEOh7KkWPAC4lQb9mcY8J5HAzGKSP4TDdBrj+SzCGkkqTkHk2NmuWw+sAfklQBYDunAPUaLlMG4Qc9INXkZEERa8Xdvx+2A0E" +
+            "pJR8Pv4UJe1CoaeZwb8E2WwWcrkcCILQST6fd2YymeRS6SG9j5JGKEQ3AW7XAJZFeOBAhN8+v+p7V61jJimi5AMvbgVXDIiRjiBO0A2f" +
+            "3b9uud3u5IzRyOMEDA4MFKCES6fTCbGZwS6XK2G3250RvR42ZM09E/A8D/F4PCaHOY6LWSwWzmq1wp8Cj8fjiMzOLbAzs2YEeZPJ5DCb" +
+            "zfAvgc1mi7L20Unvok6ni2q12hGDwQCDBEV8nRWMdIkajWZapVLFMZxarQb8hn6CMkI3mDvMhVwwzO/8DbWQqn7YBXReAAAAAElFTkSuQmCC");
+
+        internal static Bitmap CreatePipetteBitmap()
+        {
+            // Not disposed: GDI+ needs the stream as long as the bitmap lives
+            return new Bitmap(new System.IO.MemoryStream(PipettePngBytes));
+        }
+
         public Pipette()
         {
             BorderStyle = BorderStyle.FixedSingle;
             _dragging = false;
-            _image = (Bitmap) new ComponentResourceManager(typeof(ColorDialog)).GetObject("pipette.Image");
+            _image = CreatePipetteBitmap();
             Image = _image;
             _cursor = CreateCursor(_image, 1, 14);
-            _movableShowColorForm = new MovableShowColorForm();
+            _movableShowColorWindow = new MovableShowColorWindow();
             Application.AddMessageFilter(this);
         }
 
@@ -69,10 +82,18 @@ namespace Greenshot.Editor.Controls
         {
             using SafeIconHandle iconHandle = new SafeIconHandle(bitmap.GetHicon());
             NativeIconMethods.GetIconInfo(iconHandle, out var iconInfo);
-            iconInfo.Hotspot = new NativePoint(hotspotX, hotspotY);
-            iconInfo.IsIcon = false;
-            var icon = NativeIconMethods.CreateIconIndirect(ref iconInfo);
-            return new Cursor(icon);
+            try
+            {
+                iconInfo.Hotspot = new NativePoint(hotspotX, hotspotY);
+                iconInfo.IsIcon = false;
+                var icon = NativeIconMethods.CreateIconIndirect(ref iconInfo);
+                return new Cursor(icon);
+            }
+            finally
+            {
+                // GetIconInfo created copies of the bitmaps, CreateIconIndirect copied them again
+                iconInfo.DeleteBitmaps();
+            }
         }
 
         /// <summary>
@@ -96,10 +117,10 @@ namespace Greenshot.Editor.Controls
                     _cursor.Dispose();
                 }
 
-                _movableShowColorForm?.Dispose();
+                _movableShowColorWindow?.Close();
             }
 
-            _movableShowColorForm = null;
+            _movableShowColorWindow = null;
             _cursor = null;
             base.Dispose(disposing);
         }
@@ -113,7 +134,7 @@ namespace Greenshot.Editor.Controls
             if (e.Button == MouseButtons.Left)
             {
                 User32Api.SetCapture(Handle);
-                _movableShowColorForm.MoveTo(PointToScreen(new Point(e.X, e.Y)));
+                _movableShowColorWindow.MoveTo(PointToScreen(new Point(e.X, e.Y)));
             }
 
             base.OnMouseDown(e);
@@ -129,7 +150,7 @@ namespace Greenshot.Editor.Controls
             {
                 //Release Capture should consume MouseUp when canceled with the escape key 
                 User32Api.ReleaseCapture();
-                PipetteUsed?.Invoke(this, new PipetteUsedArgs(_movableShowColorForm.Color));
+                PipetteUsed?.Invoke(this, new PipetteUsedArgs(_movableShowColorWindow.Color));
             }
 
             base.OnMouseUp(e);
@@ -145,7 +166,7 @@ namespace Greenshot.Editor.Controls
             {
                 //display the form on the right side of the cursor by default;
                 Point zp = PointToScreen(new Point(e.X, e.Y));
-                _movableShowColorForm.MoveTo(zp);
+                _movableShowColorWindow.MoveTo(zp);
             }
 
             base.OnMouseMove(e);
@@ -163,14 +184,14 @@ namespace Greenshot.Editor.Controls
                 Image = null;
                 Cursor c = _cursor;
                 Cursor = c;
-                _movableShowColorForm.Visible = true;
+                _movableShowColorWindow.Show();
             }
             else
             {
                 _dragging = false;
                 Image = _image;
                 Cursor = Cursors.Arrow;
-                _movableShowColorForm.Visible = false;
+                _movableShowColorWindow.Hide();
             }
 
             Update();

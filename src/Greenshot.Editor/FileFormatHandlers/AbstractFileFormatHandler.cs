@@ -1,13 +1,13 @@
 ﻿/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -22,6 +22,9 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using Dapplo.Ini;
+using Greenshot.Base.Core;
+using Greenshot.Base.Core.FileFormat;
 using Greenshot.Base.Interfaces;
 using Greenshot.Base.Interfaces.Drawing;
 using Greenshot.Base.Interfaces.Plugin;
@@ -40,9 +43,44 @@ namespace Greenshot.Editor.FileFormatHandlers
             return 0;
         }
 
+        /// <summary>
+        /// The priority of a handler which loads an image only when no other handler does (a lower value comes first), e.g. when WIC has no decoder for it
+        /// </summary>
+        protected const int FallbackLoadPriority = 10;
+
+        /// <summary>
+        /// The priority of a handler which saves a format before the others (a lower value comes first), e.g. WIC on Windows
+        /// </summary>
+        protected const int PreferredSavePriority = -10;
+
+        /// <summary>
+        /// A loaded photo is turned upright by its EXIF orientation, unless ProcessEXIFOrientation turns it off
+        /// </summary>
+        protected static bool ApplyExifOrientation => !IniConfigRegistry.TryGetSection<ICoreConfiguration>(out var coreConfiguration) || coreConfiguration.ProcessEXIFOrientation;
+
+        protected static bool IsLoadAction(FileFormatHandlerActions fileFormatHandlerAction) =>
+            fileFormatHandlerAction is FileFormatHandlerActions.LoadFromStream or FileFormatHandlerActions.LoadFromFile or FileFormatHandlerActions.LoadDrawableFromStream;
+
         public abstract bool TrySaveToStream(Bitmap bitmap, Stream destination, string extension, ISurface surface = null, SurfaceOutputSettings surfaceOutputSettings = null);
 
         public abstract bool TryLoadFromStream(Stream stream, string extension, out Bitmap bitmap);
+
+        public virtual void RegisterFileFormats(IFileFormatRegistry registry)
+        {
+        }
+
+        protected static void RegisterFileFormat(
+            IFileFormatRegistry registry, 
+            string formatId,
+            IEnumerable<string> loadableExtensions,
+            IEnumerable<string> saveableExtensions,
+            string preferredExtension,
+            string mimeType,
+            IEnumerable<string> mimeTypeAliases,
+            string displayName)
+        {
+            registry.RegisterIfMissing(new FileFormatDefinition(formatId, loadableExtensions, saveableExtensions, preferredExtension, mimeType, mimeTypeAliases, displayName));
+        }
 
         /// <summary>
         /// Default implementation taking the TryLoadFromStream image and placing it in an ImageContainer 
@@ -59,8 +97,14 @@ namespace Greenshot.Editor.FileFormatHandlers
                 {
                     Image = bitmap
                 };
+                imageContainer.ResetToDefaultSize();
                 yield return imageContainer;
             }
+        }
+
+        public virtual ISurface LoadSurface(Stream stream)
+        {
+            throw new System.NotImplementedException();
         }
     }
 }

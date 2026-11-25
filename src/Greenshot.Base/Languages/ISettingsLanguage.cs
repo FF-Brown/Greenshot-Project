@@ -1,0 +1,1362 @@
+/*
+ * Greenshot - a free and open source screenshot tool
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
+ *
+ * For more information see: https://getgreenshot.org/
+ * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+using System.ComponentModel;
+using Dapplo.Ini.Internationalization.Attributes;
+
+namespace Greenshot.Base.Languages
+{
+    /// <summary>
+    /// The texts of the [Settings] section of greenshot.{ietf}.ini, the English text is shown per property.
+    /// Generated from the language files, add a key to the en-US file and a property here.
+    /// </summary>
+    [IniLanguageSection("Settings")]
+    public interface ISettingsLanguage : INotifyPropertyChanged
+    {
+        /// <summary>
+        /// Save as .reg…
+        /// </summary>
+        string AdministratorSettingsSaveReg { get; }
+
+        /// <summary>
+        /// AI tools
+        /// </summary>
+        string Aitools { get; }
+
+        /// <summary>
+        /// Access
+        /// </summary>
+        string AitoolsAccess { get; }
+
+        /// <summary>
+        /// Add
+        /// </summary>
+        string AitoolsAdd { get; }
+
+        /// <summary>
+        /// These programs may use Greenshot. Remove one with ✕ to be asked again the next time it connects.
+        /// </summary>
+        string AitoolsAllowed { get; }
+
+        /// <summary>
+        /// Not allowed until Greenshot restarts
+        /// </summary>
+        string AitoolsDenied { get; }
+
+        /// <summary>
+        /// Allow
+        /// </summary>
+        string AitoolsDeniedAllow { get; }
+
+        /// <summary>
+        /// Ask Again
+        /// </summary>
+        string AitoolsDeniedAskagain { get; }
+
+        /// <summary>
+        /// You answered "Don't Allow" (or closed the question) for these programs, so Greenshot refuses them without asking. Allow one here (saved with OK), or let Greenshot ask again the next time it connects.
+        /// </summary>
+        string AitoolsDeniedDescription { get; }
+
+        /// <summary>
+        /// Let AI tools use Greenshot
+        /// </summary>
+        string AitoolsEnabled { get; }
+
+        /// <summary>
+        /// AI tools (like Claude Desktop or VS Code) connect through greenshot-mcp.exe, a separate download that has to be next to Greenshot.exe. They can list your windows, take screenshots and run your recipes. While this is off, Greenshot refuses every request without asking. Each program still needs your permission the first time it connects.
+        /// </summary>
+        string AitoolsEnabledDescription { get; }
+
+        /// <summary>
+        /// Never share these applications
+        /// </summary>
+        string AitoolsExcluded { get; }
+
+        /// <summary>
+        /// A process name, like KeePass or keepass.exe; Enter adds it
+        /// </summary>
+        string AitoolsExcludedAddTooltip { get; }
+
+        /// <summary>
+        /// Windows of these applications are never listed or captured for AI tools. Names are process names without .exe, upper and lower case don't matter.
+        /// </summary>
+        string AitoolsExcludedDescription { get; }
+
+        /// <summary>
+        /// Download Greenshot-MCP for this version from the releases page and extract it next to Greenshot.exe:
+        /// </summary>
+        string AitoolsMcpDownload { get; }
+
+        /// <summary>
+        /// No program is allowed yet.
+        /// </summary>
+        string AitoolsNone { get; }
+
+        /// <summary>
+        /// Show a notification when an AI tool takes a screenshot
+        /// </summary>
+        string AitoolsNotify { get; }
+
+        /// <summary>
+        /// What AI tools may do
+        /// </summary>
+        string AitoolsPermissions { get; }
+
+        /// <summary>
+        /// Allowed programs
+        /// </summary>
+        string AitoolsPrograms { get; }
+
+        /// <summary>
+        /// Let AI tools propose recipes
+        /// </summary>
+        string AitoolsProposals { get; }
+
+        /// <summary>
+        /// You see every proposed recipe and decide whether to approve it. Its triggers and risky actions start switched off.
+        /// </summary>
+        string AitoolsProposalsDescription { get; }
+
+        /// <summary>
+        /// Remove
+        /// </summary>
+        string AitoolsRemove { get; }
+
+        /// <summary>
+        /// Show print options dialog every time an image is printed
+        /// </summary>
+        string Alwaysshowprintoptionsdialog { get; }
+
+        /// <summary>
+        /// Show quality dialog every time an image is saved
+        /// </summary>
+        string Alwaysshowqualitydialog { get; }
+
+        /// <summary>
+        /// Application Settings
+        /// </summary>
+        string Applicationsettings { get; }
+
+        /// <summary>
+        /// Launch Greenshot on startup
+        /// </summary>
+        string Autostartshortcut { get; }
+
+        /// <summary>
+        /// Capture
+        /// </summary>
+        string Capture { get; }
+
+        /// <summary>
+        /// Capture mousepointer
+        /// </summary>
+        string CaptureMousepointer { get; }
+
+        /// <summary>
+        /// Keep the HDR content of HDR displays (for JPEG XR files)
+        /// </summary>
+        string CaptureHdr { get; }
+
+        /// <summary>
+        /// Some settings are set by your organization (Windows policies) and can't be changed here.
+        /// </summary>
+        string ManagedByOrganization { get; }
+
+        /// <summary>
+        /// On an HDR display the capture keeps its HDR content too: saving it as JPEG XR (also from the editor) keeps the highlights. Costs memory only for the HDR displays.
+        /// </summary>
+        string TipCaptureHdr { get; }
+
+        /// <summary>
+        /// Use interactive window capture mode
+        /// </summary>
+        string CaptureWindowsInteractive { get; }
+
+        /// <summary>
+        /// Check for updates
+        /// </summary>
+        string UpdateCheck { get; }
+
+        /// <summary>
+        /// Days between checks
+        /// </summary>
+        string UpdateCheckInterval { get; }
+
+        /// <summary>
+        /// Check now
+        /// </summary>
+        string UpdateCheckNow { get; }
+
+        /// <summary>
+        /// This is Greenshot {0}.
+        /// </summary>
+        string UpdateCurrentVersion { get; }
+
+        /// <summary>
+        /// Configure
+        /// </summary>
+        string Configureplugin { get; }
+
+        /// <summary>
+        /// Copy file path to clipboard every time an image is saved
+        /// </summary>
+        string Copypathtoclipboard { get; }
+
+        /// <summary>
+        /// Destination
+        /// </summary>
+        string Destination { get; }
+
+        /// <summary>
+        /// Copy to clipboard
+        /// </summary>
+        string DestinationClipboard { get; }
+
+        /// <summary>
+        /// Open in image editor
+        /// </summary>
+        string DestinationEditor { get; }
+
+        /// <summary>
+        /// Add to editor
+        /// </summary>
+        string DestinationEditorAdd { get; }
+
+        /// <summary>
+        /// E-Mail
+        /// </summary>
+        string DestinationEmail { get; }
+
+        /// <summary>
+        /// Save directly (using settings below)
+        /// </summary>
+        string DestinationFile { get; }
+
+        /// <summary>
+        /// Save as (displaying dialog)
+        /// </summary>
+        string DestinationFileas { get; }
+
+        /// <summary>
+        /// Ask for destination every time
+        /// </summary>
+        string DestinationPicker { get; }
+
+        /// <summary>
+        /// Ask for destination every time, in a window
+        /// </summary>
+        string DestinationWindow { get; }
+
+        /// <summary>
+        /// Send to printer
+        /// </summary>
+        string DestinationPrinter { get; }
+
+        /// <summary>
+        /// Show in a viewer
+        /// </summary>
+        string DestinationViewer { get; }
+
+        /// <summary>
+        /// Search the web for this image
+        /// </summary>
+        string DestinationImageSearch { get; }
+
+        /// <summary>
+        /// Viewer
+        /// </summary>
+        string Viewer { get; }
+
+        /// <summary>
+        /// Size of a new viewer
+        /// </summary>
+        string ViewerFirstSize { get; }
+
+        /// <summary>
+        /// Real size (1:1), at most as big as the screen
+        /// </summary>
+        string ViewerOpenAtRealSize { get; }
+
+        /// <summary>
+        /// Otherwise at most (pixels)
+        /// </summary>
+        string ViewerMaximumSize { get; }
+
+        /// <summary>
+        /// Viewer window
+        /// </summary>
+        string ViewerWindow { get; }
+
+        /// <summary>
+        /// Border color contrasting with the light or dark mode
+        /// </summary>
+        string ViewerBorderColorFollowsTheme { get; }
+
+        /// <summary>
+        /// Border color
+        /// </summary>
+        string ViewerBorderColor { get; }
+
+        /// <summary>
+        /// After a capture
+        /// </summary>
+        string DestinationAfterCapture { get; }
+
+        /// <summary>
+        /// Send it to:
+        /// </summary>
+        string DestinationSendTo { get; }
+
+        /// <summary>
+        /// Tick at least one destination, or choose "Ask for destination every time".
+        /// </summary>
+        string DestinationSendToRequired { get; }
+
+        /// <summary>
+        /// Destinations Greenshot offers
+        /// </summary>
+        string DestinationOffered { get; }
+
+        /// <summary>
+        /// A destination which is switched off isn't in the menus, the destination window or recipes.
+        /// </summary>
+        string DestinationOfferedHint { get; }
+
+        /// <summary>
+        /// Not loaded (shown on a destination of a plugin which isn't loaded)
+        /// </summary>
+        string DestinationNotLoaded { get; }
+
+        /// <summary>
+        /// Plugins are switched on or off at the next start of Greenshot.
+        /// </summary>
+        string PluginsRestart { get; }
+
+        /// <summary>
+        /// Switched off
+        /// </summary>
+        string PluginOff { get; }
+
+        /// <summary>
+        /// Not installed
+        /// </summary>
+        string PluginNotInstalled { get; }
+
+        /// <summary>
+        /// Not loaded, see the log
+        /// </summary>
+        string PluginNotLoaded { get; }
+
+        /// <summary>
+        /// Blocked by your administrator
+        /// </summary>
+        string PluginBlocked { get; }
+
+        /// <summary>
+        /// Signed by {0}
+        /// </summary>
+        string PluginSignedBy { get; }
+
+        /// <summary>
+        /// Not signed
+        /// </summary>
+        string PluginNotSigned { get; }
+
+        /// <summary>
+        /// Your administrator doesn't let you switch these off (greenshot-fixed.ini)
+        /// </summary>
+        string SetByAdministrator { get; }
+
+        /// <summary>
+        /// Block plugins…
+        /// </summary>
+        string BlockPlugins { get; }
+
+        /// <summary>
+        /// Block destinations…
+        /// </summary>
+        string BlockDestinations { get; }
+
+        /// <summary>
+        /// Restrict for all users (greenshot-fixed.ini)
+        /// </summary>
+        string RestrictForAllUsersTitle { get; }
+
+        /// <summary>
+        /// Copy these lines into greenshot-fixed.ini next to Greenshot.exe. Users can't switch on what these lines block.
+        /// </summary>
+        string AdministratorSettingsDescription { get; }
+
+        /// <summary>
+        /// Block what isn't checked
+        /// </summary>
+        string AdministratorSettingsBlockUnchecked { get; }
+
+        /// <summary>
+        /// Allow only what is checked, block everything else, also plugins and destinations which aren't known yet
+        /// </summary>
+        string AdministratorSettingsOnlyChecked { get; }
+
+        /// <summary>
+        /// Not installed yet? Add a plugin or destination by its name...
+        /// </summary>
+        string AddNotInstalled { get; }
+
+        /// <summary>
+        /// Name of the plugin or destination
+        /// </summary>
+        string AddNotInstalledName { get; }
+
+        /// <summary>
+        /// Add plugin
+        /// </summary>
+        string AddPlugin { get; }
+
+        /// <summary>
+        /// Add destination
+        /// </summary>
+        string AddDestination { get; }
+
+        /// <summary>
+        /// Users can't switch off plugins or destinations themselves
+        /// </summary>
+        string AdministratorSettingsNoUserExclusions { get; }
+
+        /// <summary>
+        /// Don't ask about plugins which aren't signed by the makers of Greenshot, load only the ones approved on this PC
+        /// </summary>
+        string AdministratorSettingsNoUnsignedQuestion { get; }
+
+        /// <summary>
+        /// Copy
+        /// </summary>
+        string AdministratorSettingsCopy { get; }
+
+        /// <summary>
+        /// Save as…
+        /// </summary>
+        string AdministratorSettingsSave { get; }
+
+        /// <summary>
+        /// Editor
+        /// </summary>
+        string Editor { get; }
+
+        /// <summary>
+        /// Create an 8-bit image if the colors are less than 256 while having a &gt; 8 bits image
+        /// </summary>
+        string ExpertAutoreducecolors { get; }
+
+        /// <summary>
+        /// Enable beta-test features
+        /// </summary>
+        string ExpertBetatester { get; }
+
+        /// <summary>
+        /// Check for unstable updates
+        /// </summary>
+        string ExpertCheckunstableupdates { get; }
+
+        /// <summary>
+        /// Clipboard formats
+        /// </summary>
+        string ExpertClipboardformats { get; }
+
+        /// <summary>
+        /// The number for the ${counter.global} in the filename pattern
+        /// </summary>
+        string ExpertCounter { get; }
+
+        /// <summary>
+        /// I know what I am doing!
+        /// </summary>
+        string ExpertEnableexpert { get; }
+
+        /// <summary>
+        /// Printer footer pattern
+        /// </summary>
+        string ExpertFooterpattern { get; }
+
+        /// <summary>
+        /// Minimize memory footprint, but with a performance penalty (not advised).
+        /// </summary>
+        string ExpertMinimizememoryfootprint { get; }
+
+        /// <summary>
+        /// Draw the windows with the graphics card (uses more memory, takes effect after a restart)
+        /// </summary>
+        string ExpertHardwarerendering { get; }
+
+        /// <summary>
+        /// Take screenshots with DirectX (Windows Graphics Capture, needed for HDR screens)
+        /// </summary>
+        string ExpertGraphicscapture { get; }
+
+        /// <summary>
+        /// Ignore the screen reader flag of Windows when capturing (when a program left it on)
+        /// </summary>
+        string ExpertIgnorescreenreader { get; }
+
+        /// <summary>
+        /// Keep DirectX ready for faster screenshots (uses more memory)
+        /// </summary>
+        string ExpertKeepgraphicscaptureready { get; }
+
+        /// <summary>
+        /// Prepare the capture in the background after the start (uses more memory)
+        /// </summary>
+        string ExpertPrewarmcapture { get; }
+
+        /// <summary>
+        /// Prepare the editor in the background after the start (uses more memory)
+        /// </summary>
+        string ExpertPrewarmeditor { get; }
+
+        /// <summary>
+        /// Most memory (MB) kept by unused buffers, 0 = no limit (takes effect after a restart)
+        /// </summary>
+        string ExpertBufferpoollimit { get; }
+
+        /// <summary>
+        /// Make some optimizations for usage with remote desktop
+        /// </summary>
+        string ExpertOptimizeforrdp { get; }
+
+        /// <summary>
+        /// Open new captures as a tab in the editor window used last
+        /// </summary>
+        string OpenCaptureAsTab { get; }
+
+        /// <summary>
+        /// Show the captures of an editor window as tabs
+        /// </summary>
+        string EditorTabs { get; }
+
+        /// <summary>
+        /// Size of a new image
+        /// </summary>
+        string NewImageSize { get; }
+
+        /// <summary>
+        /// Color of a new image
+        /// </summary>
+        string NewImageColor { get; }
+
+        /// <summary>
+        /// Suppress the save dialog when closing the editor
+        /// </summary>
+        string ExpertSuppresssavedialogatclose { get; }
+
+
+        /// <summary>
+        /// Filename pattern
+        /// </summary>
+        string Filenamepattern { get; }
+
+        /// <summary>
+        /// General
+        /// </summary>
+        string General { get; }
+
+        /// <summary>
+        /// Icon size
+        /// </summary>
+        string Iconsize { get; }
+
+        /// <summary>
+        /// JPEG quality
+        /// </summary>
+        string Jpegquality { get; }
+
+        /// <summary>
+        /// Language
+        /// </summary>
+        string Language { get; }
+
+        /// <summary>
+        /// Network and updates
+        /// </summary>
+        string Network { get; }
+
+        /// <summary>
+        /// Memory and speed
+        /// </summary>
+        string MemoryProfile { get; }
+
+        /// <summary>
+        /// Fast: prepare and keep everything ready (default)
+        /// </summary>
+        string MemoryProfileFast { get; }
+
+        /// <summary>
+        /// Balanced: smooth capture window, nothing else kept ready
+        /// </summary>
+        string MemoryProfileBalanced { get; }
+
+        /// <summary>
+        /// Low memory: software rendering, nothing kept ready
+        /// </summary>
+        string MemoryProfileLowmemory { get; }
+
+        /// <summary>
+        /// Custom
+        /// </summary>
+        string MemoryProfileCustom { get; }
+
+        /// <summary>
+        /// Greenshot prepares the capture and the editor and keeps them ready, so they open fast. That costs memory, most of it in the graphics driver. A profile sets the settings below, which can also be changed one by one.
+        /// </summary>
+        string TooltipMemoryProfile { get; }
+
+        /// <summary>
+        /// Text recognition (OCR)
+        /// </summary>
+        string Ocr { get; }
+
+        /// <summary>
+        /// Recognized by
+        /// </summary>
+        string OcrEngine { get; }
+
+        /// <summary>
+        /// Windows OCR
+        /// </summary>
+        string OcrEngineWindows { get; }
+
+        /// <summary>
+        /// Language of the text
+        /// </summary>
+        string OcrLanguage { get; }
+
+        /// <summary>
+        /// Automatic (Windows language settings)
+        /// </summary>
+        string OcrLanguageAutomatic { get; }
+
+        /// <summary>
+        /// not installed
+        /// </summary>
+        string OcrLanguageNotinstalled { get; }
+
+        /// <summary>
+        /// Output
+        /// </summary>
+        string Output { get; }
+
+        /// <summary>
+        /// Play camera sound
+        /// </summary>
+        string Playsound { get; }
+
+        /// <summary>
+        /// Plugins
+        /// </summary>
+        string Plugins { get; }
+
+        /// <summary>
+        /// Created by
+        /// </summary>
+        string PluginsCreatedby { get; }
+
+        /// <summary>
+        /// DLL Path
+        /// </summary>
+        string PluginsDllpath { get; }
+
+        /// <summary>
+        /// Name
+        /// </summary>
+        string PluginsName { get; }
+
+        /// <summary>
+        /// Version
+        /// </summary>
+        string PluginsVersion { get; }
+
+        /// <summary>
+        /// Preferred Output File Settings
+        /// </summary>
+        string Preferredfilesettings { get; }
+
+        /// <summary>
+        /// Image format
+        /// </summary>
+        string Primaryimageformat { get; }
+
+        /// <summary>
+        /// Printer
+        /// </summary>
+        string Printer { get; }
+
+        /// <summary>
+        /// Print options
+        /// </summary>
+        string Printoptions { get; }
+
+        /// <summary>
+        /// Quality settings
+        /// </summary>
+        string Qualitysettings { get; }
+
+        /// <summary>
+        /// Approved recipes
+        /// </summary>
+        string Recipeapprovals { get; }
+
+        /// <summary>
+        /// Recipes from files, also those written by AI tools, and what you approved for them. Changes here take effect right away, also when you cancel the settings.
+        /// </summary>
+        string RecipeapprovalsDescription { get; }
+
+        /// <summary>
+        /// Details
+        /// </summary>
+        string RecipeapprovalsDetails { get; }
+
+        /// <summary>
+        /// Review...
+        /// </summary>
+        string RecipeapprovalsReview { get; }
+
+        /// <summary>
+        /// Revoke
+        /// </summary>
+        string RecipeapprovalsRevoke { get; }
+
+        /// <summary>
+        /// Recipes
+        /// </summary>
+        string Recipes { get; }
+
+        /// <summary>
+        /// Change…
+        /// </summary>
+        string RecipesChange { get; }
+
+        /// <summary>
+        /// Changed recipes
+        /// </summary>
+        string RecipesChanges { get; }
+
+        /// <summary>
+        /// No automatic step changes a recipe; switch one on above.
+        /// </summary>
+        string RecipesChangesNone { get; }
+
+        /// <summary>
+        /// Automatic steps for your captures, like a border or a caption, and the settings your recipes offer. They are used from the next capture on.
+        /// </summary>
+        string RecipesDescription { get; }
+
+        /// <summary>
+        /// Reset to defaults
+        /// </summary>
+        string RecipesReset { get; }
+
+        /// <summary>
+        /// Get More Recipes
+        /// </summary>
+        string RecipesGetMore { get; }
+
+        /// <summary>
+        /// Opens the recipe catalog on getgreenshot.org, install a recipe there with its Install button
+        /// </summary>
+        string RecipesGetMoreTooltip { get; }
+
+        /// <summary>
+        /// The hotkey is written in the recipe file, it is changed in the recipe editor
+        /// </summary>
+        string HotkeySetInRecipe { get; }
+
+        /// <summary>
+        /// A hotkey on the General tab is also the hotkey of another recipe ({0}: its name), only one of them can work
+        /// </summary>
+        string HotkeyConflict { get; }
+
+        /// <summary>
+        /// Choose a folder
+        /// </summary>
+        string RecipesChooseFolder { get; }
+
+        /// <summary>
+        /// All
+        /// </summary>
+        string RecipesScopeAll { get; }
+
+        /// <summary>
+        /// All captures
+        /// </summary>
+        string RecipesScopeAllcaptures { get; }
+
+        /// <summary>
+        /// all destinations
+        /// </summary>
+        string RecipesScopeAlldestinations { get; }
+
+        /// <summary>
+        /// Captures
+        /// </summary>
+        string RecipesScopeCaptures { get; }
+
+        /// <summary>
+        /// This automatic step changes the captures of the checked recipes, for the checked destinations. New recipes get it too.
+        /// </summary>
+        string RecipesScopeDescription { get; }
+
+        /// <summary>
+        /// Destinations
+        /// </summary>
+        string RecipesScopeDestinations { get; }
+
+        /// <summary>
+        /// No captures
+        /// </summary>
+        string RecipesScopeNocaptures { get; }
+
+        /// <summary>
+        /// Check at least one destination.
+        /// </summary>
+        string RecipesScopeNodestination { get; }
+
+        /// <summary>
+        /// None
+        /// </summary>
+        string RecipesScopeNone { get; }
+
+        /// <summary>
+        /// {0} of {1} captures
+        /// </summary>
+        string RecipesScopeSomecaptures { get; }
+
+        /// <summary>
+        /// Where {0} is used
+        /// </summary>
+        string RecipesScopeTitle { get; }
+
+        /// <summary>
+        /// Used for:
+        /// </summary>
+        string RecipesUsedfor { get; }
+
+        /// <summary>
+        /// Reduce the amount of colors to a maximum of 256
+        /// </summary>
+        string Reducecolors { get; }
+
+        /// <summary>
+        /// Details in saved images
+        /// </summary>
+        string ExportMetadata { get; }
+
+        /// <summary>
+        /// When the screen was captured
+        /// </summary>
+        string ExportMetadataCapturetime { get; }
+
+        /// <summary>
+        /// Author and copyright
+        /// </summary>
+        string ExportMetadataAuthor { get; }
+
+        /// <summary>
+        /// Window title and web address (private)
+        /// </summary>
+        string ExportMetadataSource { get; }
+
+        /// <summary>
+        /// Recognized text, when OCR already ran (private)
+        /// </summary>
+        string ExportMetadataText { get; }
+
+        /// <summary>
+        /// Content of barcodes and QR codes (private)
+        /// </summary>
+        string ExportMetadataBarcodes { get; }
+
+        /// <summary>
+        /// Author
+        /// </summary>
+        string ExportMetadataAuthorName { get; }
+
+        /// <summary>
+        /// Copyright
+        /// </summary>
+        string ExportMetadataCopyright { get; }
+
+        /// <summary>
+        /// Files saved on this computer get the private details. Before they go anywhere else (upload, e-mail, Office), Greenshot asks whether to remove them.
+        /// </summary>
+        string ExportMetadataPrivateHint { get; }
+
+        /// <summary>
+        /// Register Hotkeys
+        /// </summary>
+        string Registerhotkeys { get; }
+
+        /// <summary>
+        /// Show flashlight
+        /// </summary>
+        string Showflashlight { get; }
+
+        /// <summary>
+        /// Show notifications
+        /// </summary>
+        string Shownotify { get; }
+
+        /// <summary>
+        /// Notifications
+        /// </summary>
+        string Notifications { get; }
+
+        /// <summary>
+        /// All
+        /// </summary>
+        string NotificationsAll { get; }
+
+        /// <summary>
+        /// Warnings and errors
+        /// </summary>
+        string NotificationsWarnings { get; }
+
+        /// <summary>
+        /// Errors only
+        /// </summary>
+        string NotificationsErrors { get; }
+
+        /// <summary>
+        /// None
+        /// </summary>
+        string NotificationsNone { get; }
+
+        /// <summary>
+        /// Show a thumbnail of the capture in the notification
+        /// </summary>
+        string NotificationThumbnail { get; }
+
+        /// <summary>
+        /// Storage location
+        /// </summary>
+        string Storagelocation { get; }
+
+        /// <summary>
+        /// The folder browser could not be opened.
+        ///
+        ///     The storage location has been set to your Documents folder. You can type a different path directly into the box if needed.
+        /// </summary>
+        string StoragelocationFolderError { get; }
+
+        /// <summary>
+        /// Storage Location
+        /// </summary>
+        string StoragelocationFolderErrorTitle { get; }
+
+        /// <summary>
+        /// Colors
+        /// </summary>
+        string Theme { get; }
+
+        /// <summary>
+        /// Dark
+        /// </summary>
+        string ThemeDark { get; }
+
+        /// <summary>
+        /// Light
+        /// </summary>
+        string ThemeLight { get; }
+
+        /// <summary>
+        /// Same as Windows
+        /// </summary>
+        string ThemeSystem { get; }
+
+        /// <summary>
+        /// Settings
+        /// </summary>
+        string Title { get; }
+
+        /// <summary>
+        /// Pattern used for generating filenames when saving screenshots
+        /// </summary>
+        string TooltipFilenamepattern { get; }
+
+        /// <summary>
+        /// Language of greenshot's user interface
+        /// </summary>
+        string TooltipLanguage { get; }
+
+        /// <summary>
+        /// The language Windows recognizes text in, for capturing text and the OCR destination. More languages can be added in the Windows settings (Time and language, Language and region).
+        /// </summary>
+        string TooltipOcrLanguage { get; }
+
+        /// <summary>
+        /// What recognizes text, for capturing text, the OCR destination and the recipes. Windows OCR is built into Windows; a plugin can add another one.
+        /// </summary>
+        string TooltipOcrEngine { get; }
+
+        /// <summary>
+        /// Image format used by default
+        /// </summary>
+        string TooltipPrimaryimageformat { get; }
+
+        /// <summary>
+        /// Defines whether the shortcuts Prnt, Ctrl + Print, Alt + Prnt are reserved for global use by Greenshot at program startup, until the program is shut down.
+        /// </summary>
+        string TooltipRegisterhotkeys { get; }
+
+        /// <summary>
+        /// Location where screenshots are stored by default (leave empty for saving to your desktop)
+        /// </summary>
+        string TooltipStoragelocation { get; }
+
+        /// <summary>
+        /// Use default system proxy
+        /// </summary>
+        string Usedefaultproxy { get; }
+
+        /// <summary>
+        /// Tray icon
+        /// </summary>
+        string Trayicon { get; }
+
+        /// <summary>
+        /// Click
+        /// </summary>
+        string TrayiconClick { get; }
+
+        /// <summary>
+        /// Double-click
+        /// </summary>
+        string TrayiconDoubleclick { get; }
+
+        /// <summary>
+        /// Do nothing
+        /// </summary>
+        string TrayiconNothing { get; }
+
+        /// <summary>
+        /// {0} (not available)
+        /// </summary>
+        string TrayiconNotavailable { get; }
+
+        /// <summary>
+        /// The recipe which runs when the Greenshot icon next to the clock is clicked. The list has the recipes which are on and need nothing given to them: no editor, no file and no arguments. Right-clicking the icon always opens the tray menu.
+        /// </summary>
+        string TooltipTrayicon { get; }
+
+        /// <summary>
+        /// Effects
+        /// </summary>
+        string Visualization { get; }
+
+        /// <summary>
+        /// Milliseconds to wait before capture
+        /// </summary>
+        string Waittime { get; }
+
+        /// <summary>
+        /// Wait before every capture of the screen (to open a menu or popup first)
+        /// </summary>
+        string CaptureWait { get; }
+
+        /// <summary>
+        /// Show a countdown during the wait
+        /// </summary>
+        string CaptureWaitCountdown { get; }
+
+        /// <summary>
+        /// Fixed capture sizes
+        /// </summary>
+        string FixedCaptureSizes { get; }
+
+        /// <summary>
+        /// The sizes F offers in the region selection, in this order: 1 picks the first. The sizes of the last region captures are offered below them.
+        /// </summary>
+        string TooltipFixedCaptureSizes { get; }
+
+        /// <summary>
+        /// Add a size
+        /// </summary>
+        string FixedCaptureSizesAdd { get; }
+
+        /// <summary>
+        /// Width
+        /// </summary>
+        string FixedCaptureSizesWidth { get; }
+
+        /// <summary>
+        /// Height
+        /// </summary>
+        string FixedCaptureSizesHeight { get; }
+
+        /// <summary>
+        /// X (optional)
+        /// </summary>
+        string FixedCaptureSizesX { get; }
+
+        /// <summary>
+        /// Y (optional)
+        /// </summary>
+        string FixedCaptureSizesY { get; }
+
+        /// <summary>
+        /// From the top left of
+        /// </summary>
+        string FixedCaptureSizesRelativeTo { get; }
+
+        /// <summary>
+        /// The main screen
+        /// </summary>
+        string FixedCaptureSizesMainScreen { get; }
+
+        /// <summary>
+        /// Screen {0}
+        /// </summary>
+        string FixedCaptureSizesScreen { get; }
+
+        /// <summary>
+        /// A window of a program
+        /// </summary>
+        string FixedCaptureSizesProgram { get; }
+
+        /// <summary>
+        /// Program, e.g. notepad.exe
+        /// </summary>
+        string FixedCaptureSizesProgramName { get; }
+
+        /// <summary>
+        /// Keep it as one of your own sizes
+        /// </summary>
+        string FixedCaptureSizesKeep { get; }
+
+        /// <summary>
+        /// Change this size (a click on a fixed capture size in the settings)
+        /// </summary>
+        string FixedCaptureSizesChange { get; }
+
+        /// <summary>
+        /// Recent captures keep
+        /// </summary>
+        string FixedCaptureRemembers { get; }
+
+        /// <summary>
+        /// Only the size
+        /// </summary>
+        string FixedCaptureRemembersSize { get; }
+
+        /// <summary>
+        /// The place on the screen
+        /// </summary>
+        string FixedCaptureRemembersScreen { get; }
+
+        /// <summary>
+        /// The place in the window, else on the screen
+        /// </summary>
+        string FixedCaptureRemembersWindow { get; }
+
+        /// <summary>
+        /// What F in the region selection offers of your last captures: only the size, also the place on the screen, or also the place in the window of the program, which follows the window.
+        /// </summary>
+        string TooltipFixedCaptureRemembers { get; }
+
+        /// <summary>
+        /// Move the mouse to the place of a size
+        /// </summary>
+        string FixedCaptureMovesCursor { get; }
+
+        /// <summary>
+        /// Picking a size with a place moves the mouse so the area is there. When off, the place is shown as an outline and the area snaps onto it.
+        /// </summary>
+        string TooltipFixedCaptureMovesCursor { get; }
+
+        /// <summary>
+        /// Freeze the screen while selecting
+        /// </summary>
+        string FreezeScreen { get; }
+
+        /// <summary>
+        /// Off: what is on the screen keeps moving while you select, only the selection is captured, when you make it
+        /// </summary>
+        string TooltipFreezeScreen { get; }
+
+        /// <summary>
+        /// Larger icons
+        /// </summary>
+        string IconsizeIncrease { get; }
+
+        /// <summary>
+        /// Smaller icons
+        /// </summary>
+        string IconsizeDecrease { get; }
+
+        /// <summary>
+        /// Choose the storage location
+        /// </summary>
+        string StoragelocationBrowse { get; }
+
+        /// <summary>
+        /// Placeholders of the filename pattern
+        /// </summary>
+        string FilenamepatternHelp { get; }
+
+        /// <summary>
+        /// Edit
+        /// </summary>
+        string HotkeyEdit { get; }
+
+        /// <summary>
+        /// Edit {0}: {1}
+        /// </summary>
+        string HotkeyEditValueAccessible { get; }
+
+        /// <summary>
+        /// Change the hotkey
+        /// </summary>
+        string HotkeyChange { get; }
+
+        /// <summary>
+        /// None
+        /// </summary>
+        string HotkeyNone { get; }
+
+        /// <summary>
+        /// then
+        /// </summary>
+        string HotkeyThen { get; }
+
+        /// <summary>
+        /// Step {0}:
+        /// </summary>
+        string HotkeyStep { get; }
+
+        /// <summary>
+        /// Step {0}: {1}
+        /// </summary>
+        string HotkeyStepAccessible { get; }
+
+        /// <summary>
+        /// Step {0}: {1}, selected
+        /// </summary>
+        string HotkeyStepSelectedAccessible { get; }
+
+        /// <summary>
+        /// Configure Hotkey: {0}
+        /// </summary>
+        string HotkeyEditorTitle { get; }
+
+        /// <summary>
+        /// Modifiers
+        /// </summary>
+        string HotkeyModifiers { get; }
+
+        /// <summary>
+        /// Ctrl key, left or right
+        /// </summary>
+        string HotkeyCtrlLocation { get; }
+
+        /// <summary>
+        /// Alt key, left or right
+        /// </summary>
+        string HotkeyAltLocation { get; }
+
+        /// <summary>
+        /// Shift key, left or right
+        /// </summary>
+        string HotkeyShiftLocation { get; }
+
+        /// <summary>
+        /// Win key, left or right
+        /// </summary>
+        string HotkeyWinLocation { get; }
+
+        /// <summary>
+        /// Key Sequence Steps &amp; Capture
+        /// </summary>
+        string HotkeyStepsCapture { get; }
+
+        /// <summary>
+        /// Remove step
+        /// </summary>
+        string HotkeyRemoveStep { get; }
+
+        /// <summary>
+        /// + Add Step
+        /// </summary>
+        string HotkeyAddStep { get; }
+
+        /// <summary>
+        /// Add next chord step to this sequence
+        /// </summary>
+        string HotkeyAddStepTooltip { get; }
+
+        /// <summary>
+        /// Hotkey
+        /// </summary>
+        string HotkeyCapture { get; }
+
+        /// <summary>
+        /// Press the keys of the hotkey. Tab moves on, Esc cancels.
+        /// </summary>
+        string HotkeyCaptureHelp { get; }
+
+        /// <summary>
+        /// Click here to focus and press shortcut keys
+        /// </summary>
+        string HotkeyCaptureHint { get; }
+
+        /// <summary>
+        /// Listening... Press keys on your keyboard
+        /// </summary>
+        string HotkeyCaptureListening { get; }
+
+        /// <summary>
+        /// Click here and press key
+        /// </summary>
+        string HotkeyPressKey { get; }
+
+        /// <summary>
+        /// Clear / Reset
+        /// </summary>
+        string HotkeyClear { get; }
+
+        /// <summary>
+        /// Preview:
+        /// </summary>
+        string HotkeyPreview { get; }
+
+        /// <summary>
+        /// Save / Apply
+        /// </summary>
+        string HotkeySave { get; }
+
+        /// <summary>
+        /// Please choose a trigger key for the selected modifiers.
+        /// </summary>
+        string HotkeyErrorNoTrigger { get; }
+
+        /// <summary>
+        /// Step {0} requires a trigger key.
+        /// </summary>
+        string HotkeyErrorStepNoTrigger { get; }
+    }
+}

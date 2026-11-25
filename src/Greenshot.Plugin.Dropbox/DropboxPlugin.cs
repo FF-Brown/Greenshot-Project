@@ -1,13 +1,13 @@
 /*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom, Francis Noel
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom, Francis Noel
  *
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
@@ -21,118 +21,80 @@
 
 using System;
 using System.ComponentModel;
-using System.Drawing;
-using System.Windows.Forms;
-using Greenshot.Base.Controls;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using Greenshot.Base.Core;
-using Greenshot.Base.IniFile;
 using Greenshot.Base.Interfaces;
 using Greenshot.Base.Interfaces.Plugin;
+using Greenshot.Base.Recipes.Pipeline;
+using Greenshot.Base.Threading;
+using Greenshot.Plugin.Dropbox.Api;
+using Greenshot.Plugin.Dropbox.Destinations;
+using Greenshot.Base.Languages;
+using Greenshot.Plugin.Dropbox.Recipes;
+using Greenshot.Plugin.Dropbox.Views;
+using Greenshot.Base.Expressions;
 
-namespace Greenshot.Plugin.Dropbox
+namespace Greenshot.Plugin.Dropbox;
+
+/// <summary>
+/// This is the Dropbox base code
+/// </summary>
+public class DropboxPlugin : IGreenshotPlugin, IConfigurablePlugin, IRecipeStepProvider
 {
-    /// <summary>
-    /// This is the Dropbox base code
-    /// </summary>
-    public class DropboxPlugin : IGreenshotPlugin
+    private static readonly log4net.ILog Log = log4net.LogManager.GetLogger(typeof(DropboxPlugin));
+    private static IDropboxConfiguration _config;
+
+    public ValueTask DisposeAsync()
     {
-        private static readonly log4net.ILog Log = log4net.LogManager.GetLogger(typeof(DropboxPlugin));
-        private static DropboxConfiguration _config;
-        private ComponentResourceManager _resources;
-        private ToolStripMenuItem _itemPlugInConfig;
+        return default;
+    }
 
-        public void Dispose()
-        {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
+    /// <summary>
+    /// Name of the plugin
+    /// </summary>
+    public string Name => "Dropbox";
 
-        private void Dispose(bool disposing)
-        {
-            if (!disposing) return;
-            if (_itemPlugInConfig == null) return;
-            _itemPlugInConfig.Dispose();
-            _itemPlugInConfig = null;
-        }
+    public void ConfigureServices(IPluginServices services)
+    {
+        Texts.Register<IDropboxLanguage>(new DropboxLanguageImpl());
+        var section = new DropboxConfigurationImpl();
+        services.AddConfiguration(section);
+        _config = section;
 
-        /// <summary>
-        /// Name of the plugin
-        /// </summary>
-        public string Name => "Dropbox";
+        services.AddService<IIconProvider>(DropboxDestination.Icons);
+        services.AddService<IDestination>(new DropboxDestination(this));
+        services.AddRecipeStepProvider(this);
+        services.AddSettingsView<IDropboxConfiguration>(config => new DropboxConfigurationView(config));
+    }
 
-        /// <summary>
-        /// Specifies if the plugin can be configured
-        /// </summary>
-        public bool IsConfigurable => true;
+    public object CreateSettingsViewModel(IServiceProvider services) => _config;
 
-        /// <summary>
-        /// Implementation of the IGreenshotPlugin.Initialize
-        /// </summary>
-        public bool Initialize()
-        {
-            // Register configuration (don't need the configuration itself)
-            _config = IniConfig.GetIniSection<DropboxConfiguration>();
-            _resources = new ComponentResourceManager(typeof(DropboxPlugin));
-            SimpleServiceProvider.Current.AddService<IDestination>(new DropboxDestination(this));
-            _itemPlugInConfig = new ToolStripMenuItem
-            {
-                Text = Language.GetString("dropbox", LangKey.Configure),
-                Image = (Image) _resources.GetObject("Dropbox")
-            };
-            _itemPlugInConfig.Click += ConfigMenuClick;
+    /// <summary>
+    /// Registers recipe step factories provided by the Dropbox plugin.
+    /// </summary>
+    /// <param name="registry">The step registry.</param>
+    public void RegisterSteps(IStepRegistry registry)
+    {
+        if (registry == null) return;
+        registry.Register<DropboxStep>(config => new DropboxStep(config, this));
+    }
 
-            PluginUtils.AddToContextMenu(_itemPlugInConfig);
-            Language.LanguageChanged += OnLanguageChanged;
-            return true;
-        }
+    public Task StartAsync(IServiceProvider services, CancellationToken cancellationToken) => Task.CompletedTask;
 
-        public void OnLanguageChanged(object sender, EventArgs e)
-        {
-            if (_itemPlugInConfig != null)
-            {
-                _itemPlugInConfig.Text = Language.GetString("dropbox", LangKey.Configure);
-            }
-        }
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-        public void Shutdown()
-        {
-            Log.Debug("Dropbox Plugin shutdown.");
-        }
-
-        /// <summary>
-        /// Implementation of the IPlugin.Configure
-        /// </summary>
-        public void Configure()
-        {
-            _config.ShowConfigDialog();
-        }
-
-        public void ConfigMenuClick(object sender, EventArgs eventArgs)
-        {
-            _config.ShowConfigDialog();
-        }
-
-        /// <summary>
-        /// This will be called when the menu item in the Editor is clicked
-        /// </summary>
-        public bool Upload(ICaptureDetails captureDetails, ISurface surfaceToUpload, out string uploadUrl)
-        {
-            uploadUrl = null;
-            SurfaceOutputSettings outputSettings = new SurfaceOutputSettings(_config.UploadFormat, _config.UploadJpegQuality, false);
-            try
-            {
-                bool result = false;
-                new PleaseWaitForm().ShowAndWait("Dropbox", Language.GetString("dropbox", LangKey.communication_wait),
-                    delegate { result = DropboxUtils.UploadToDropbox(surfaceToUpload, outputSettings, captureDetails); }
-                );
-                return result;
-            }
-            catch (Exception e)
-            {
-                Log.Error(e);
-                MessageBox.Show(Language.GetString("dropbox", LangKey.upload_failure) + " " + e.Message);
-                return false;
-            }
-        }
+    /// <summary>
+    /// Upload the capture to Dropbox, shows the progress to the user.
+    /// </summary>
+    /// <returns>true when uploaded, false when Dropbox didn't accept it, null when the user didn't authorize</returns>
+    public async Task<bool?> UploadAsync(IExportSource source, ICaptureDetails captureDetails, IUserInteraction userInteraction, CancellationToken cancellationToken)
+    {
+        var outputSettings = new SurfaceOutputSettings(_config.UploadFormat, _config.UploadJpegQuality, false);
+        string filename = OutputTemplates.UploadFileName(captureDetails, _config.UploadFormat);
+        var image = await source.EncodeAsync(outputSettings, cancellationToken).ConfigureAwait(false);
+        return await userInteraction.RunWithProgressAsync(Texts.Get<IDropboxLanguage>().CommunicationWait,
+            (progress, token) => DropboxUtils.UploadToDropboxAsync(image, filename, userInteraction, progress, token), cancellationToken).ConfigureAwait(false);
     }
 }

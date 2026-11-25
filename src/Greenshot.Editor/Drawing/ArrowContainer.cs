@@ -1,13 +1,13 @@
 ﻿/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -76,26 +76,19 @@ namespace Greenshot.Editor.Drawing
             graphics.PixelOffsetMode = PixelOffsetMode.None;
             Color lineColor = GetFieldValueAsColor(FieldType.LINE_COLOR);
             ArrowHeadCombination heads = (ArrowHeadCombination) GetFieldValue(FieldType.ARROWHEADS);
-            if (shadow)
+            if (lineThickness > 0)
             {
-                //draw shadow first
-                int basealpha = 100;
-                int alpha = basealpha;
-                int steps = 5;
-                int currentStep = 1;
-                while (currentStep <= steps)
+                if (shadow)
                 {
-                    using Pen shadowCapPen = new Pen(Color.FromArgb(alpha, 100, 100, 100), lineThickness);
-                    SetArrowHeads(heads, shadowCapPen);
-
-                    graphics.DrawLine(shadowCapPen,
-                        Left + currentStep,
-                        Top + currentStep,
-                        Left + currentStep + Width,
-                        Top + currentStep + Height);
-
-                    currentStep++;
-                    alpha -= basealpha / steps;
+                    DrawShadow(lineThickness, (alpha, currentStep, shadowPen, nil) =>
+                    {
+                        SetArrowHeads(heads, shadowPen);
+                        graphics.DrawLine(shadowPen,
+                            Left + currentStep,
+                            Top + currentStep,
+                            Left + currentStep + Width,
+                            Top + currentStep + Height);
+                    });
                 }
             }
 
@@ -117,26 +110,38 @@ namespace Greenshot.Editor.Drawing
             }
         }
 
+        // The paint asks for the drawing bounds several times per element, the path with the arrow heads is only measured when its inputs change
+        [NonSerialized] private (int Left, int Top, int Width, int Height, int LineThickness, ArrowHeadCombination Heads)? _drawingBoundsKey;
+        [NonSerialized] private NativeRect _drawingBounds;
+
         public override NativeRect DrawingBounds
         {
             get
             {
                 int lineThickness = GetFieldValueAsInt(FieldType.LINE_THICKNESS);
-                if (lineThickness > 0)
+                if (lineThickness <= 0)
                 {
-                    using Pen pen = new Pen(Color.White)
-                    {
-                        Width = lineThickness
-                    };
-                    SetArrowHeads((ArrowHeadCombination) GetFieldValue(FieldType.ARROWHEADS), pen);
-                    using GraphicsPath path = new GraphicsPath();
-                    path.AddLine(Left, Top, Left + Width, Top + Height);
-                    using Matrix matrix = new Matrix();
-                    NativeRect drawingBounds = Rectangle.Round(path.GetBounds(matrix, pen));
-                    return drawingBounds.Inflate(2, 2);
+                    return NativeRect.Empty;
                 }
 
-                return NativeRect.Empty;
+                var heads = (ArrowHeadCombination) GetFieldValue(FieldType.ARROWHEADS);
+                var key = (Left, Top, Width, Height, lineThickness, heads);
+                if (_drawingBoundsKey == key)
+                {
+                    return _drawingBounds;
+                }
+
+                using Pen pen = new Pen(Color.White)
+                {
+                    Width = lineThickness
+                };
+                SetArrowHeads(heads, pen);
+                using GraphicsPath path = new GraphicsPath();
+                path.AddLine(Left, Top, Left + Width, Top + Height);
+                using Matrix matrix = new Matrix();
+                _drawingBounds = ((NativeRect)Rectangle.Round(path.GetBounds(matrix, pen))).Inflate(2, 2);
+                _drawingBoundsKey = key;
+                return _drawingBounds;
             }
         }
 

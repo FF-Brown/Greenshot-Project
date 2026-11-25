@@ -1,13 +1,13 @@
 /*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  *
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
@@ -25,6 +25,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
+using System.Runtime.InteropServices;
 using System.Runtime.Serialization;
 using System.Windows.Forms;
 using Dapplo.Windows.Common.Extensions;
@@ -32,6 +33,7 @@ using Dapplo.Windows.Common.Structs;
 using Greenshot.Base.Core;
 using Greenshot.Base.Interfaces;
 using Greenshot.Base.Interfaces.Drawing;
+using Greenshot.Base.Languages;
 using Greenshot.Editor.Drawing.Fields;
 using Greenshot.Editor.Memento;
 
@@ -43,6 +45,10 @@ namespace Greenshot.Editor.Drawing
     [Serializable]
     public class TextContainer : RectangleContainer, ITextContainer
     {
+        [DllImport("gdi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DeleteObject(IntPtr hObject);
+
         // If makeUndoable is true the next text-change will make the change undoable.
         // This is set to true AFTER the first change is made, as there is already a "add element" on the undo stack
         // Although the name is wrong, we can't change it due to file serialization
@@ -277,11 +283,24 @@ namespace Greenshot.Editor.Drawing
             ShowTextBox();
         }
 
+        public override void AddContextMenuItems(ContextMenuStrip menu, ISurface surface, MouseEventArgs mouseEventArgs)
+        {
+            // The surface asks every element, only the selected text adds its item
+            if (!Selected)
+            {
+                return;
+            }
+
+            var editItem = new ToolStripMenuItem(Texts.Editor.EditText);
+            editItem.Click += (_, _) => ShowTextBox();
+            menu.Items.Add(editItem);
+        }
+
         private void CreateTextBox()
         {
             _textBox = new TextBox
             {
-                ImeMode = ImeMode.On,
+                ImeMode = ImeMode.NoControl,
                 Multiline = true,
                 AcceptsTab = true,
                 AcceptsReturn = true,
@@ -362,11 +381,18 @@ namespace Greenshot.Editor.Drawing
             rect = new NativeRect(Left, Top, Width, Height).Normalize();
 
             int pixelsAfter = rect.Width * rect.Height;
-            float factor = pixelsAfter / (float) pixelsBefore;
 
-            float fontSize = GetFieldValueAsFloat(FieldType.FONT_SIZE);
-            fontSize *= factor;
-            SetFieldValue(FieldType.FONT_SIZE, fontSize);
+            // Guard against zero-area containers (e.g. a collapsed/degenerate rectangle
+            // loaded from an old file) which would produce Infinity/NaN for the scale
+            // factor and corrupt FONT_SIZE, ultimately causing ArgumentException in GDI.
+            if (pixelsBefore > 0)
+            {
+                float factor = pixelsAfter / (float) pixelsBefore;
+                float fontSize = GetFieldValueAsFloat(FieldType.FONT_SIZE);
+                fontSize = Math.Max(1f, fontSize * factor);
+                SetFieldValue(FieldType.FONT_SIZE, fontSize);
+            }
+
             UpdateFormat();
         }
 
@@ -478,14 +504,49 @@ namespace Greenshot.Editor.Drawing
 
             var textBoxFontScale = _parent?.ZoomFactor ?? Fraction.Identity;
 
-            var newFont = new Font(
-                _font.FontFamily,
-                _font.Size * textBoxFontScale,
-                _font.Style,
-                GraphicsUnit.Pixel
-            );
-            _textBox.Font.Dispose();
+            // Clamp to ≥1px: GDI rejects zero/negative/sub-pixel sizes with
+            // "Parameter is not valid" deep inside Font.ToHfont().  This can happen
+            // with fonts deserialized from old .greenshot files whose FONT_SIZE field
+            // was stored as a very small or zero value.
+            float scaledSize = Math.Max(1f, _font.Size * textBoxFontScale);
+
+            Font newFont = null;
+            try
+            {
+                newFont = new Font(_font.FontFamily, scaledSize, _font.Style, GraphicsUnit.Pixel);
+                // Probe GDI compatibility before handing the font to WinForms.
+                // Font.ToHfont() is exactly what WinForms calls internally when creating
+                // the control handle; calling it here lets us catch and recover from
+                // ArgumentException for fonts that cannot be represented as a GDI HFONT
+                // (e.g. faces no longer installed, or invalid metrics from old .greenshot files).
+                var hFont = newFont.ToHfont();
+                DeleteObject(hFont);
+            }
+            catch (ArgumentException)
+            {
+                // Fall back to a safe generic font, preserving the style so bold/italic
+                // text remains visually consistent.
+                newFont?.Dispose();
+                newFont = new Font(FontFamily.GenericSansSerif, scaledSize, _font.Style, GraphicsUnit.Pixel);
+            }
+
+            // Assign new font before disposing old: Control.Font setter is a no-op when
+            // the fonts compare equal by value (same family/size/style/unit). Disposing
+            // first then hitting the no-op would leave _textBox.Font pointing to a freed
+            // Font object, causing ArgumentException in Font.ToHfont on handle creation.
+            var oldFont = _textBox.Font;
             _textBox.Font = newFont;
+
+            if (ReferenceEquals(_textBox.Font, oldFont))
+            {
+                // Setter was a no-op; oldFont is still in use. Dispose the unused newFont.
+                newFont.Dispose();
+            }
+            else
+            {
+                // Setter ran and newFont is now stored. Dispose the replaced oldFont.
+                oldFont.Dispose();
+            }
         }
 
         /// <summary>
@@ -568,19 +629,33 @@ namespace Greenshot.Editor.Drawing
             if (e.KeyCode == Keys.Back && e.Control)
             {
                 e.SuppressKeyPress = true;
-                int selStart = _textBox.SelectionStart;
-                while (selStart > 0 && _textBox.Text.Substring(selStart - 1, 1) == " ")
+                // Remove the word before the cursor, a line break ends a word too (BUG-2583)
+                string currentText = _textBox.Text;
+                int end = _textBox.SelectionStart;
+                int start = end;
+                while (start > 0 && (currentText[start - 1] == ' ' || currentText[start - 1] == '\t'))
                 {
-                    selStart--;
+                    start--;
                 }
 
-                int prevSpacePos = -1;
-                if (selStart != 0)
+                if (start > 0 && currentText[start - 1] == '\n')
                 {
-                    prevSpacePos = _textBox.Text.LastIndexOf(' ', selStart - 1);
+                    // At the start of a line only the line break is removed
+                    start--;
+                    if (start > 0 && currentText[start - 1] == '\r')
+                    {
+                        start--;
+                    }
+                }
+                else
+                {
+                    while (start > 0 && !char.IsWhiteSpace(currentText[start - 1]))
+                    {
+                        start--;
+                    }
                 }
 
-                _textBox.Select(prevSpacePos + 1, _textBox.SelectionStart - prevSpacePos - 1);
+                _textBox.Select(start, end - start);
                 _textBox.SelectedText = string.Empty;
             }
         }
@@ -649,24 +724,16 @@ namespace Greenshot.Editor.Drawing
             // draw shadow before anything else
             if (drawShadow)
             {
-                int basealpha = 100;
-                int alpha = basealpha;
-                int steps = 5;
-                int currentStep = 1;
-                while (currentStep <= steps)
+                DrawShadow(lineThickness, (alpha, currentStep, nil, fontBrush) =>
                 {
                     int offset = currentStep;
-                    NativeRect shadowRect = new NativeRect(drawingRectange.Left + offset, drawingRectange.Top + offset, drawingRectange.Width, drawingRectange.Height).Normalize();
+                    Rectangle shadowRect = new NativeRect(drawingRectange.Left + offset, drawingRectange.Top + offset, drawingRectange.Width, drawingRectange.Height);
                     if (lineThickness > 0)
                     {
-                        shadowRect = shadowRect.Inflate(-textOffset, -textOffset);
+                        shadowRect.Inflate(-textOffset, -textOffset);
                     }
-                    using Brush fontBrush = new SolidBrush(Color.FromArgb(alpha, 100, 100, 100));
                     graphics.DrawString(text, font, fontBrush, shadowRect, stringFormat);
-
-                    currentStep++;
-                    alpha -= basealpha / steps;
-                }
+                });
             }
 
             if (lineThickness > 0)

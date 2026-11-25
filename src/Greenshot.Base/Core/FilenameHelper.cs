@@ -1,13 +1,13 @@
 ﻿/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -20,37 +20,17 @@
  */
 
 using System;
-using System.Collections;
-using System.Collections.Generic;
+using System.Buffers;
+using System.Globalization;
 using System.IO;
-using System.Text.RegularExpressions;
-using System.Windows.Forms;
-using Greenshot.Base.Core.Enums;
-using Greenshot.Base.IniFile;
-using Greenshot.Base.Interfaces;
-using log4net;
+using System.Text;
 
 namespace Greenshot.Base.Core
 {
     public static class FilenameHelper
     {
-        private static readonly ILog Log = LogManager.GetLogger(typeof(FilenameHelper));
-
-        // Specify the regular expression for the filename formatting:
-        // Starting with ${
-        // than the varname, which ends with a : or }
-        // If a parameters needs to be supplied, than a ":" should follow the name... everything from the : until the } is considered to be part of the parameters.
-        // The parameter format is a single alpha followed by the value belonging to the parameter, e.g. :
-        // ${capturetime:d"yyyy-MM-dd HH_mm_ss"}
-        private static readonly Regex VarRegexp = new Regex(@"\${(?<variable>[^:}]+)[:]?(?<parameters>[^}]*)}", RegexOptions.Compiled);
-        private static readonly Regex CmdVarRegexp = new Regex(@"%(?<variable>[^%]+)%", RegexOptions.Compiled);
-
-        private static readonly Regex SplitRegexp = new Regex(";(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", RegexOptions.Compiled);
-        private const int MaxTitleLength = 80;
-        private static readonly CoreConfiguration CoreConfig = IniConfig.GetIniSection<CoreConfiguration>();
+        // File names and folders from templates: see Greenshot.Base.Expressions.OutputTemplates
         private const string UnsafeReplacement = "_";
-        private static readonly Random RandomNumberGen = new Random();
-        private static readonly Regex RandRegexp = new Regex("^R+$", RegexOptions.Compiled);
 
         /// <summary>
         /// Remove invalid characters from the fully qualified filename
@@ -66,22 +46,199 @@ namespace Greenshot.Base.Core
         }
 
         /// <summary>
-        /// Remove invalid characters from the filename
+        /// A whole file name made safe, see <see cref="ToSafeNamePart"/>; also without dots and spaces at the end
+        /// (Windows drops them) and with a _ before a reserved device name like CON or NUL
         /// </summary>
-        /// <param name="filename">string with the full path to a file</param>
-        /// <returns>string with the full path to a file, without invalid characters</returns>
+        /// <param name="filename">name of a file, without folder</param>
+        /// <returns>the safe file name, null for null</returns>
         public static string MakeFilenameSafe(string filename)
         {
-            // Make the filename save!
-            if (filename != null)
+            if (filename == null)
             {
-                foreach (char disallowed in Path.GetInvalidFileNameChars())
-                {
-                    filename = filename.Replace(disallowed.ToString(), UnsafeReplacement);
-                }
+                return null;
             }
 
-            return filename;
+            string safe = ToSafeNamePart(filename).TrimEnd('.', ' ');
+            return IsReservedDeviceName(safe) ? UnsafeReplacement + safe : safe;
+        }
+
+        /// <summary>
+        /// One part of a file or folder name from text that comes from outside, like a window title or a web page, in one pass:
+        /// <list type="bullet">
+        /// <item>characters Windows doesn't allow in a name (control characters, line separators and &lt;&gt;:"/\|?*) become _</item>
+        /// <item>invisible format characters are left out: direction marks and overrides (U+202E can make "fdp.exe" look like "exe.pdf"),
+        /// zero width space, BOM, soft hyphen and the like (BUG-2164)</item>
+        /// <item>the zero width (non-)joiner stays only between two characters which aren't ASCII, as emoji and some scripts
+        /// (e.g. Persian) need it, so it can't hide inside a plain word</item>
+        /// <item>tag characters stay only in a flag emoji (black flag, tags, cancel tag), else they could carry hidden text</item>
+        /// <item>NFC normalized, no white space at the start or end, at most <paramref name="maxLength"/> characters, only dots become _</item>
+        /// </list>
+        /// Text that is already safe is returned as it is, without a new string.
+        /// </summary>
+        /// <param name="value">the text, may be null</param>
+        /// <param name="maxLength">most characters to keep, a surrogate pair is never cut</param>
+        /// <returns>the safe text, empty for null</returns>
+        public static string ToSafeNamePart(string value, int maxLength = int.MaxValue)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return string.Empty;
+            }
+
+            value = NormalizeToFormC(value);
+            char[] rented = null;
+            Span<char> buffer = value.Length <= StackBufferLength ? stackalloc char[value.Length] : (rented = ArrayPool<char>.Shared.Rent(value.Length));
+            try
+            {
+                int length = 0;
+                bool changed = false;
+                int previous = -1;
+                for (int i = 0; i < value.Length;)
+                {
+                    int width = char.IsSurrogatePair(value, i) ? 2 : 1;
+                    int codePoint = width == 2 ? char.ConvertToUtf32(value[i], value[i + 1]) : value[i];
+                    if (IsTag(codePoint))
+                    {
+                        // A run of tags: kept only as the black flag, tag letters and the cancel tag of e.g. the England flag
+                        int end = i;
+                        int last = codePoint;
+                        while (end < value.Length && char.IsSurrogatePair(value, end))
+                        {
+                            int tag = char.ConvertToUtf32(value[end], value[end + 1]);
+                            if (!IsTag(tag))
+                            {
+                                break;
+                            }
+                            last = tag;
+                            end += 2;
+                        }
+                        bool flag = previous == BlackFlag && last == CancelTag && end - i >= 4;
+                        if (flag)
+                        {
+                            value.AsSpan(i, end - i).CopyTo(buffer.Slice(length));
+                            length += end - i;
+                            previous = CancelTag;
+                        }
+                        else
+                        {
+                            changed = true;
+                        }
+                        i = end;
+                        continue;
+                    }
+
+                    var category = CharUnicodeInfo.GetUnicodeCategory(value, i);
+                    if (char.IsSurrogate(value[i]) && width == 1 || category == UnicodeCategory.Control || category == UnicodeCategory.LineSeparator
+                        || category == UnicodeCategory.ParagraphSeparator || NotInNames.IndexOf(value[i]) >= 0)
+                    {
+                        buffer[length++] = UnsafeReplacementChar;
+                        previous = UnsafeReplacementChar;
+                        changed = true;
+                    }
+                    else if (category == UnicodeCategory.Format && !(IsJoiner(codePoint) && JoinsTwoNonAsciiCharacters(value, i, previous)))
+                    {
+                        changed = true;
+                    }
+                    else
+                    {
+                        value.AsSpan(i, width).CopyTo(buffer.Slice(length));
+                        length += width;
+                        previous = codePoint;
+                    }
+                    i += width;
+                }
+
+                ReadOnlySpan<char> safe = buffer.Slice(0, length);
+                safe = safe.Trim();
+                if (safe.Length > maxLength)
+                {
+                    int cut = char.IsHighSurrogate(safe[maxLength - 1]) ? maxLength - 1 : maxLength;
+                    safe = safe.Slice(0, cut).TrimEnd();
+                }
+                // A joiner at the end after cutting joins nothing
+                while (safe.Length > 0 && IsJoiner(safe[safe.Length - 1]))
+                {
+                    safe = safe.Slice(0, safe.Length - 1);
+                }
+                if (safe.Length > 0 && safe.Trim('.').IsEmpty)
+                {
+                    // Only dots would point to this or the parent folder
+                    return new string(UnsafeReplacementChar, safe.Length);
+                }
+
+                return !changed && safe.Length == value.Length ? value : safe.ToString();
+            }
+            finally
+            {
+                if (rented != null)
+                {
+                    ArrayPool<char>.Shared.Return(rented);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Is the name, or its part before the first dot, a device name Windows reserves (CON, PRN, AUX, NUL, COM1-9, LPT1-9, also with ¹²³)
+        /// </summary>
+        public static bool IsReservedDeviceName(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                return false;
+            }
+
+            int dot = name.IndexOf('.');
+            var stem = (dot < 0 ? name.AsSpan() : name.AsSpan(0, dot)).TrimEnd(' ');
+            if (stem.Length == 3)
+            {
+                return stem.Equals("CON".AsSpan(), StringComparison.OrdinalIgnoreCase) || stem.Equals("PRN".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                    || stem.Equals("AUX".AsSpan(), StringComparison.OrdinalIgnoreCase) || stem.Equals("NUL".AsSpan(), StringComparison.OrdinalIgnoreCase);
+            }
+            if (stem.Length == 4 && (stem.StartsWith("COM".AsSpan(), StringComparison.OrdinalIgnoreCase) || stem.StartsWith("LPT".AsSpan(), StringComparison.OrdinalIgnoreCase)))
+            {
+                char number = stem[3];
+                return number >= '1' && number <= '9' || number == '\u00B9' || number == '\u00B2' || number == '\u00B3';
+            }
+            return stem.Equals("CONIN$".AsSpan(), StringComparison.OrdinalIgnoreCase) || stem.Equals("CONOUT$".AsSpan(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private const char UnsafeReplacementChar = '_';
+        private const int StackBufferLength = 256;
+        private const string NotInNames = "<>:\"/\\|?*";
+        private const int ZeroWidthNonJoiner = 0x200C;
+        private const int ZeroWidthJoiner = 0x200D;
+        private const int BlackFlag = 0x1F3F4;
+        private const int CancelTag = 0xE007F;
+
+        private static bool IsJoiner(int codePoint) => codePoint == ZeroWidthJoiner || codePoint == ZeroWidthNonJoiner;
+
+        private static bool IsTag(int codePoint) => codePoint >= 0xE0000 && codePoint <= CancelTag;
+
+        /// <summary>
+        /// The joiner at index stands between the last kept character and the next one, and both aren't ASCII nor invisible
+        /// </summary>
+        private static bool JoinsTwoNonAsciiCharacters(string value, int index, int previous)
+        {
+            if (previous < 0x80 || IsJoiner(previous) || index + 1 >= value.Length || value[index + 1] < 0x80)
+            {
+                return false;
+            }
+            var next = CharUnicodeInfo.GetUnicodeCategory(value, index + 1);
+            return next != UnicodeCategory.Format && next != UnicodeCategory.Control && next != UnicodeCategory.Surrogate
+                && next != UnicodeCategory.LineSeparator && next != UnicodeCategory.ParagraphSeparator && next != UnicodeCategory.SpaceSeparator;
+        }
+
+        private static string NormalizeToFormC(string value)
+        {
+            try
+            {
+                return value.IsNormalized(NormalizationForm.FormC) ? value : value.Normalize(NormalizationForm.FormC);
+            }
+            catch (ArgumentException)
+            {
+                // A lone surrogate can't be normalized, it becomes _ anyway
+                return value;
+            }
         }
 
         /// <summary>
@@ -101,568 +258,6 @@ namespace Greenshot.Base.Core
             }
 
             return path;
-        }
-
-        public static string GetFilenameWithoutExtensionFromPattern(string pattern)
-        {
-            return GetFilenameWithoutExtensionFromPattern(pattern, null);
-        }
-
-        public static string GetFilenameWithoutExtensionFromPattern(string pattern, ICaptureDetails captureDetails)
-        {
-            return FillPattern(pattern, captureDetails, true);
-        }
-
-        public static string GetFilenameFromPattern(string pattern, OutputFormat imageFormat)
-        {
-            return GetFilenameFromPattern(pattern, imageFormat, null);
-        }
-
-        public static string GetFilenameFromPattern(string pattern, OutputFormat imageFormat, ICaptureDetails captureDetails)
-        {
-            return FillPattern(pattern, captureDetails, true) + "." + imageFormat.ToString().ToLower();
-        }
-
-        /// <summary>
-        /// Return a filename for the current image format (png,jpg etc) with the default file pattern
-        /// that is specified in the configuration
-        /// </summary>
-        /// <param name="format">A string with the format</param>
-        /// <param name="captureDetails"></param>
-        /// <returns>The filename which should be used to save the image</returns>
-        public static string GetFilename(OutputFormat format, ICaptureDetails captureDetails)
-        {
-            string pattern = CoreConfig.OutputFileFilenamePattern;
-            if (string.IsNullOrEmpty(pattern?.Trim()))
-            {
-                pattern = "greenshot ${capturetime}";
-            }
-
-            return GetFilenameFromPattern(pattern, format, captureDetails);
-        }
-
-
-        /// <summary>
-        /// This method will be called by the regexp.replace as a MatchEvaluator delegate!
-        /// Will delegate this to the MatchVarEvaluatorInternal and catch any exceptions
-        /// </summary>
-        /// <param name="match">What are we matching?</param>
-        /// <param name="captureDetails">The detail, can be null</param>
-        /// <param name="processVars">Variables from the process</param>
-        /// <param name="userVars">Variables from the user</param>
-        /// <param name="machineVars">Variables from the machine</param>
-        /// <param name="filenameSafeMode"></param>
-        /// <returns>string with the match replacement</returns>
-        private static string MatchVarEvaluator(Match match, ICaptureDetails captureDetails, IDictionary processVars, IDictionary userVars, IDictionary machineVars,
-            bool filenameSafeMode)
-        {
-            try
-            {
-                return MatchVarEvaluatorInternal(match, captureDetails, processVars, userVars, machineVars, filenameSafeMode);
-            }
-            catch (Exception e)
-            {
-                Log.Error("Error in MatchVarEvaluatorInternal", e);
-            }
-
-            return string.Empty;
-        }
-
-        /// <summary>
-        /// This method will be called by the regexp.replace as a MatchEvaluator delegate!
-        /// </summary>
-        /// <param name="match">What are we matching?</param>
-        /// <param name="captureDetails">The detail, can be null</param>
-        /// <param name="processVars"></param>
-        /// <param name="userVars"></param>
-        /// <param name="machineVars"></param>
-        /// <param name="filenameSafeMode"></param>
-        /// <returns></returns>
-        private static string MatchVarEvaluatorInternal(Match match, ICaptureDetails captureDetails, IDictionary processVars, IDictionary userVars, IDictionary machineVars,
-            bool filenameSafeMode)
-        {
-            // some defaults
-            int padWidth = 0;
-            int startIndex = 0;
-            int endIndex = 0;
-            char padChar = ' ';
-            string dateFormat = "yyyy-MM-dd HH-mm-ss";
-            IDictionary<string, string> replacements = new Dictionary<string, string>();
-            string replaceValue = string.Empty;
-            string variable = match.Groups["variable"].Value;
-            string parameters = match.Groups["parameters"].Value;
-            string randomChars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-
-            if (parameters.Length > 0)
-            {
-                string[] parms = SplitRegexp.Split(parameters);
-                foreach (string parameter in parms)
-                {
-                    switch (parameter.Substring(0, 1))
-                    {
-                        // Padding p<width>[,pad-character]
-                        case "p":
-                            string[] padParams = parameter.Substring(1).Split(',');
-                            try
-                            {
-                                padWidth = int.Parse(padParams[0]);
-                            }
-                            catch
-                            {
-                                // ignored
-                            }
-
-                            if (padParams.Length > 1)
-                            {
-                                padChar = padParams[1][0];
-                            }
-
-                            break;
-                        // replace
-                        // r<old string>,<new string>
-                        case "r":
-                            string[] replaceParameters = parameter.Substring(1).Split(',');
-                            if (replaceParameters != null && replaceParameters.Length == 2)
-                            {
-                                replacements.Add(replaceParameters[0], replaceParameters[1]);
-                            }
-
-                            break;
-                        // Dateformat d<format>
-                        // Format can be anything that is used in C# date formatting
-                        case "d":
-                            dateFormat = parameter.Substring(1);
-                            if (dateFormat.StartsWith("\""))
-                            {
-                                dateFormat = dateFormat.Substring(1);
-                            }
-
-                            if (dateFormat.EndsWith("\""))
-                            {
-                                dateFormat = dateFormat.Substring(0, dateFormat.Length - 1);
-                            }
-
-                            break;
-                        // Substring:
-                        // s<start>[,length]
-                        case "s":
-                            string range = parameter.Substring(1);
-                            string[] rangelist = range.Split(',');
-                            if (rangelist.Length > 0)
-                            {
-                                try
-                                {
-                                    startIndex = int.Parse(rangelist[0]);
-                                }
-                                catch
-                                {
-                                    // Ignore
-                                }
-                            }
-
-                            if (rangelist.Length > 1)
-                            {
-                                try
-                                {
-                                    endIndex = int.Parse(rangelist[1]);
-                                }
-                                catch
-                                {
-                                    // Ignore
-                                }
-                            }
-
-                            break;
-                    }
-                }
-            }
-
-            if (processVars != null && processVars.Contains(variable))
-            {
-                replaceValue = (string) processVars[variable];
-                if (filenameSafeMode)
-                {
-                    replaceValue = MakePathSafe(replaceValue);
-                }
-            }
-            else if (userVars != null && userVars.Contains(variable))
-            {
-                replaceValue = (string) userVars[variable];
-                if (filenameSafeMode)
-                {
-                    replaceValue = MakePathSafe(replaceValue);
-                }
-            }
-            else if (machineVars != null && machineVars.Contains(variable))
-            {
-                replaceValue = (string) machineVars[variable];
-                if (filenameSafeMode)
-                {
-                    replaceValue = MakePathSafe(replaceValue);
-                }
-            }
-            else if (captureDetails?.MetaData != null && captureDetails.MetaData.ContainsKey(variable))
-            {
-                replaceValue = captureDetails.MetaData[variable];
-                if (filenameSafeMode)
-                {
-                    replaceValue = MakePathSafe(replaceValue);
-                }
-            }
-            else if (RandRegexp.IsMatch(variable))
-            {
-                for (int i = 0; i < variable.Length; i++)
-                {
-                    replaceValue += randomChars[RandomNumberGen.Next(randomChars.Length)];
-                }
-            }
-            else
-            {
-                // Handle other variables
-                // Default use "now" for the capture take´n
-                DateTime capturetime = DateTime.Now;
-                // Use default application name for title
-                string title = Application.ProductName;
-
-                // Check if we have capture details
-                if (captureDetails != null)
-                {
-                    capturetime = captureDetails.DateTime;
-                    if (captureDetails.Title != null)
-                    {
-                        title = captureDetails.Title;
-                        if (title.Length > MaxTitleLength)
-                        {
-                            title = title.Substring(0, MaxTitleLength);
-                        }
-                    }
-                }
-
-                switch (variable)
-                {
-                    case "domain":
-                        replaceValue = Environment.UserDomainName;
-                        break;
-                    case "user":
-                        replaceValue = Environment.UserName;
-                        break;
-                    case "hostname":
-                        replaceValue = Environment.MachineName;
-                        break;
-                    case "YYYY":
-                        if (padWidth == 0)
-                        {
-                            padWidth = -4;
-                            padChar = '0';
-                        }
-
-                        replaceValue = capturetime.Year.ToString();
-                        break;
-                    case "MM":
-                        replaceValue = capturetime.Month.ToString();
-                        if (padWidth == 0)
-                        {
-                            padWidth = -2;
-                            padChar = '0';
-                        }
-
-                        break;
-                    case "DD":
-                        replaceValue = capturetime.Day.ToString();
-                        if (padWidth == 0)
-                        {
-                            padWidth = -2;
-                            padChar = '0';
-                        }
-
-                        break;
-                    case "hh":
-                        if (padWidth == 0)
-                        {
-                            padWidth = -2;
-                            padChar = '0';
-                        }
-
-                        replaceValue = capturetime.Hour.ToString();
-                        break;
-                    case "mm":
-                        if (padWidth == 0)
-                        {
-                            padWidth = -2;
-                            padChar = '0';
-                        }
-
-                        replaceValue = capturetime.Minute.ToString();
-                        break;
-                    case "ss":
-                        if (padWidth == 0)
-                        {
-                            padWidth = -2;
-                            padChar = '0';
-                        }
-
-                        replaceValue = capturetime.Second.ToString();
-                        break;
-                    case "now":
-                        replaceValue = DateTime.Now.ToString(dateFormat);
-                        if (filenameSafeMode)
-                        {
-                            replaceValue = MakeFilenameSafe(replaceValue);
-                        }
-
-                        break;
-                    case "capturetime":
-                        replaceValue = capturetime.ToString(dateFormat);
-                        if (filenameSafeMode)
-                        {
-                            replaceValue = MakeFilenameSafe(replaceValue);
-                        }
-
-                        break;
-                    case "NUM":
-                        CoreConfig.OutputFileIncrementingNumber++;
-                        IniConfig.Save();
-                        replaceValue = CoreConfig.OutputFileIncrementingNumber.ToString();
-                        if (padWidth == 0)
-                        {
-                            padWidth = -6;
-                            padChar = '0';
-                        }
-
-                        break;
-                    case "title":
-                        replaceValue = title;
-                        if (filenameSafeMode)
-                        {
-                            replaceValue = MakeFilenameSafe(replaceValue);
-                        }
-
-                        break;
-                    case "MyPictures":
-                        replaceValue = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
-                        break;
-                    case "MyMusic":
-                        replaceValue = Environment.GetFolderPath(Environment.SpecialFolder.MyMusic);
-                        break;
-                    case "MyDocuments":
-                        replaceValue = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-                        break;
-                    case "Personal":
-                        replaceValue = Environment.GetFolderPath(Environment.SpecialFolder.Personal);
-                        break;
-                    case "Desktop":
-                        replaceValue = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
-                        break;
-                    case "ApplicationData":
-                        replaceValue = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                        break;
-                    case "LocalApplicationData":
-                        replaceValue = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-                        break;
-                }
-            }
-
-            // do padding
-            if (padWidth > 0)
-            {
-                replaceValue = replaceValue.PadRight(padWidth, padChar);
-            }
-            else if (padWidth < 0)
-            {
-                replaceValue = replaceValue.PadLeft(-padWidth, padChar);
-            }
-
-            // do substring
-            if (startIndex != 0 || endIndex != 0)
-            {
-                if (startIndex < 0)
-                {
-                    startIndex = replaceValue.Length + startIndex;
-                }
-
-                if (endIndex < 0)
-                {
-                    endIndex = replaceValue.Length + endIndex;
-                }
-
-                if (endIndex != 0)
-                {
-                    try
-                    {
-                        replaceValue = replaceValue.Substring(startIndex, endIndex);
-                    }
-                    catch
-                    {
-                        // Ignore
-                    }
-                }
-                else
-                {
-                    try
-                    {
-                        replaceValue = replaceValue.Substring(startIndex);
-                    }
-                    catch
-                    {
-                        // Ignore
-                    }
-                }
-            }
-
-            // new for feature #697
-            if (replacements.Count > 0)
-            {
-                foreach (string oldValue in replacements.Keys)
-                {
-                    replaceValue = replaceValue.Replace(oldValue, replacements[oldValue]);
-                }
-            }
-
-            return replaceValue;
-        }
-
-        /// <summary>
-        /// "Simply" fill the pattern with environment variables
-        /// </summary>
-        /// <param name="pattern">String with pattern %var%</param>
-        /// <param name="filenameSafeMode">true to make sure everything is filenamesafe</param>
-        /// <returns>Filled string</returns>
-        public static string FillCmdVariables(string pattern, bool filenameSafeMode = true)
-        {
-            IDictionary processVars = null;
-            IDictionary userVars = null;
-            IDictionary machineVars = null;
-            try
-            {
-                processVars = Environment.GetEnvironmentVariables(EnvironmentVariableTarget.Process);
-            }
-            catch (Exception e)
-            {
-                Log.Error("Error retrieving EnvironmentVariableTarget.Process", e);
-            }
-
-            try
-            {
-                userVars = Environment.GetEnvironmentVariables(EnvironmentVariableTarget.User);
-            }
-            catch (Exception e)
-            {
-                Log.Error("Error retrieving EnvironmentVariableTarget.User", e);
-            }
-
-            try
-            {
-                machineVars = Environment.GetEnvironmentVariables(EnvironmentVariableTarget.Machine);
-            }
-            catch (Exception e)
-            {
-                Log.Error("Error retrieving EnvironmentVariableTarget.Machine", e);
-            }
-
-            return CmdVarRegexp.Replace(pattern,
-                m => MatchVarEvaluator(m, null, processVars, userVars, machineVars, filenameSafeMode)
-            );
-        }
-
-        /// <summary>
-        /// "Simply" fill the pattern with environment variables
-        /// </summary>
-        /// <param name="pattern">String with pattern ${var}</param>
-        /// <param name="filenameSafeMode">true to make sure everything is filenamesafe</param>
-        /// <returns>Filled string</returns>
-        public static string FillVariables(string pattern, bool filenameSafeMode)
-        {
-            IDictionary processVars = null;
-            IDictionary userVars = null;
-            IDictionary machineVars = null;
-            try
-            {
-                processVars = Environment.GetEnvironmentVariables(EnvironmentVariableTarget.Process);
-            }
-            catch (Exception e)
-            {
-                Log.Error("Error retrieving EnvironmentVariableTarget.Process", e);
-            }
-
-            try
-            {
-                userVars = Environment.GetEnvironmentVariables(EnvironmentVariableTarget.User);
-            }
-            catch (Exception e)
-            {
-                Log.Error("Error retrieving EnvironmentVariableTarget.User", e);
-            }
-
-            try
-            {
-                machineVars = Environment.GetEnvironmentVariables(EnvironmentVariableTarget.Machine);
-            }
-            catch (Exception e)
-            {
-                Log.Error("Error retrieving EnvironmentVariableTarget.Machine", e);
-            }
-
-            return VarRegexp.Replace(pattern,
-                m => MatchVarEvaluator(m, null, processVars, userVars, machineVars, filenameSafeMode)
-            );
-        }
-
-        /// <summary>
-        /// Fill the pattern wit the supplied details
-        /// </summary>
-        /// <param name="pattern">Pattern</param>
-        /// <param name="captureDetails">CaptureDetails, can be null</param>
-        /// <param name="filenameSafeMode">Should the result be made "filename" safe?</param>
-        /// <returns>Filled pattern</returns>
-        public static string FillPattern(string pattern, ICaptureDetails captureDetails, bool filenameSafeMode)
-        {
-            IDictionary processVars = null;
-            IDictionary userVars = null;
-            IDictionary machineVars = null;
-            try
-            {
-                processVars = Environment.GetEnvironmentVariables(EnvironmentVariableTarget.Process);
-            }
-            catch (Exception e)
-            {
-                Log.Error("Error retrieving EnvironmentVariableTarget.Process", e);
-            }
-
-            try
-            {
-                userVars = Environment.GetEnvironmentVariables(EnvironmentVariableTarget.User);
-            }
-            catch (Exception e)
-            {
-                Log.Error("Error retrieving EnvironmentVariableTarget.User", e);
-            }
-
-            try
-            {
-                machineVars = Environment.GetEnvironmentVariables(EnvironmentVariableTarget.Machine);
-            }
-            catch (Exception e)
-            {
-                Log.Error("Error retrieving EnvironmentVariableTarget.Machine", e);
-            }
-
-            try
-            {
-                return VarRegexp.Replace(pattern,
-                    m => MatchVarEvaluator(m, captureDetails, processVars, userVars, machineVars, filenameSafeMode)
-                );
-            }
-            catch (Exception e)
-            {
-                // adding additional data for bug tracking
-                if (captureDetails != null)
-                {
-                    e.Data.Add("title", captureDetails.Title);
-                }
-
-                e.Data.Add("pattern", pattern);
-                throw;
-            }
         }
 
         /// <summary>

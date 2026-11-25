@@ -1,13 +1,13 @@
-﻿/*
+/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -20,14 +20,10 @@
  */
 
 using System;
-using System.Reflection;
-using System.Resources;
-using System.Runtime.InteropServices;
 using System.IO;
 using Dapplo.Windows.Multimedia;
-using Dapplo.Windows.Multimedia.Enums;
 using Greenshot.Base.Core;
-using Greenshot.Base.IniFile;
+using Dapplo.Ini;
 using log4net;
 
 namespace Greenshot.Helpers
@@ -39,18 +35,20 @@ namespace Greenshot.Helpers
     public static class SoundHelper
     {
         private static readonly ILog Log = LogManager.GetLogger(typeof(SoundHelper));
-        private static readonly CoreConfiguration CoreConfig = IniConfig.GetIniSection<CoreConfiguration>();
-        private static GCHandle? _gcHandle;
+        private static readonly ICoreConfiguration CoreConfig = IniConfigRegistry.GetSection<ICoreConfiguration>();
+        /// <summary>
+        /// The name of the embedded resource with the default sound (sounds\camera.wav)
+        /// </summary>
+        private const string CameraSoundResource = "Greenshot.Sounds.camera";
         private static byte[] _soundBuffer;
 
         public static void Initialize()
         {
-            if (_gcHandle == null)
+            if (_soundBuffer == null)
             {
                 try
                 {
-                    ResourceManager resources = new ResourceManager("Greenshot.Sounds", Assembly.GetExecutingAssembly());
-                    _soundBuffer = (byte[]) resources.GetObject("camera");
+                    _soundBuffer = EmbeddedResources.GetBytes(typeof(SoundHelper).Assembly, CameraSoundResource);
 
                     if (CoreConfig.NotificationSound != null && CoreConfig.NotificationSound.EndsWith(".wav"))
                     {
@@ -66,9 +64,6 @@ namespace Greenshot.Helpers
                             Log.WarnFormat("couldn't load {0}: {1}", CoreConfig.NotificationSound, ex.Message);
                         }
                     }
-
-                    // Pin sound so it can't be moved by the Garbage Collector, this was the cause for the bad sound
-                    _gcHandle = GCHandle.Alloc(_soundBuffer, GCHandleType.Pinned);
                 }
                 catch (Exception e)
                 {
@@ -79,36 +74,52 @@ namespace Greenshot.Helpers
 
         public static void Play()
         {
-            if (_soundBuffer != null)
+            if (_soundBuffer == null)
             {
-                //Thread playSoundThread = new Thread(delegate() {
-                var flags = SoundSettings.Async | SoundSettings.Memory| SoundSettings.NoWait| SoundSettings.NoStop;
-                try
-                {
-                    if (_gcHandle != null) WinMm.Play(_gcHandle.Value.AddrOfPinnedObject(), flags);
-                }
-                catch (Exception e)
-                {
-                    Log.Error("Error in play.", e);
-                }
-
-                //});
-                //playSoundThread.Name = "Play camera sound";
-                //playSoundThread.IsBackground = true;
-                //playSoundThread.Start();
+                return;
             }
+
+            try
+            {
+                // PlayWave copies the wave data and keeps it alive while the sound plays, so the buffer doesn't need to be pinned
+                if (!WinMm.PlayWave(_soundBuffer))
+                {
+                    Log.Warn("Couldn't play the notification sound.");
+                }
+            }
+            catch (Exception e)
+            {
+                Log.Error("Error in play.", e);
+            }
+        }
+
+        public static void PlayFile(string filePath)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
+                {
+                    using (var player = new System.Media.SoundPlayer(filePath))
+                    {
+                        player.Play();
+                    }
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.WarnFormat("Could not play sound file '{0}': {1}", filePath, ex.Message);
+            }
+            Play();
         }
 
         public static void Deinitialize()
         {
             try
             {
-                if (_gcHandle != null)
-                {
-                    WinMm.StopPlaying();
-                    _gcHandle.Value.Free();
-                    _gcHandle = null;
-                }
+                // Stops the sound and frees the copy of the wave data
+                WinMm.StopPlaying();
+                _soundBuffer = null;
             }
             catch (Exception e)
             {

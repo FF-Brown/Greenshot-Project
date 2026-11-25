@@ -1,13 +1,13 @@
-﻿/*
+/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2012  Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026  Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -133,6 +133,9 @@ namespace Greenshot.Editor.Drawing
             return returnValue;
         }
 
+        [NonSerialized] private (int Left, int Top, int Width, int Height, int LineThickness, bool Shadow, NativePoint Target)? _drawingBoundsKey;
+        [NonSerialized] private NativeRect _drawingBounds;
+
         /// <summary>
         /// The DrawingBound should be so close as possible to the shape, so we don't invalidate to much.
         /// </summary>
@@ -143,19 +146,27 @@ namespace Greenshot.Editor.Drawing
                 if (Status == EditStatus.UNDRAWN) return NativeRect.Empty;
 
                 int lineThickness = GetFieldValueAsInt(FieldType.LINE_THICKNESS);
-                Color lineColor = GetFieldValueAsColor(FieldType.LINE_COLOR);
                 bool shadow = GetFieldValueAsBool(FieldType.SHADOW);
-                using Pen pen = new Pen(lineColor, lineThickness);
+                var key = (Left, Top, Width, Height, lineThickness, shadow, TargetAdorner.Location);
+                // The paint asks several times per element, the tail is only measured when its inputs change
+                if (_drawingBoundsKey == key)
+                {
+                    return _drawingBounds;
+                }
+
+                using Pen pen = new Pen(Color.White, lineThickness);
                 int inflateValue = lineThickness + 2 + (shadow ? 6 : 0);
                 using GraphicsPath tailPath = CreateTail();
-         
+
                 var bubbleBounds = new NativeRect(Left, Top, Width, Height).Normalize();
                 using var matrix = new Matrix();
 
                 var tailBounds = Rectangle.Round(tailPath.GetBounds(matrix, pen));
 
                 var drawingBoundsWithoutSafety = bubbleBounds.Union(tailBounds);
-                return drawingBoundsWithoutSafety.Inflate(inflateValue, inflateValue);
+                _drawingBounds = drawingBoundsWithoutSafety.Inflate(inflateValue, inflateValue);
+                _drawingBoundsKey = key;
+                return _drawingBounds;
 
             }
         }
@@ -200,32 +211,53 @@ namespace Greenshot.Editor.Drawing
         /// Helper method to create the tail of the bubble, so we can also calculate the bounds
         /// </summary>
         /// <returns></returns>
-        private GraphicsPath CreateTail()
+        internal GraphicsPath CreateTail()
         {
             var rect = new NativeRect(Left, Top, Width, Height).Normalize();
+            float centerX = rect.Left + rect.Width / 2f;
+            float centerY = rect.Top + rect.Height / 2f;
+            float tipX = TargetAdorner.Location.X;
+            float tipY = TargetAdorner.Location.Y;
 
-            int tailLength = GeometryHelper.Distance2D(rect.Left + (rect.Width / 2), rect.Top + (rect.Height / 2), TargetAdorner.Location.X, TargetAdorner.Location.Y);
-            int tailWidth = (Math.Abs(rect.Width) + Math.Abs(rect.Height)) / 20;
-
+            float tailWidth = (Math.Abs(rect.Width) + Math.Abs(rect.Height)) / 20;
             // This should fix a problem with the tail being to wide
             tailWidth = Math.Min(Math.Abs(rect.Width) / 2, tailWidth);
             tailWidth = Math.Min(Math.Abs(rect.Height) / 2, tailWidth);
 
+            // A triangle from the middle of the bubble to the target, its base is perpendicular to the direction.
+            // Calculated with floats: a rotation by whole degrees and a rounded length missed the target by several pixels
+            // on a long tail, so the tip jumped while the bubble was moved.
+            float dx = tipX - centerX;
+            float dy = tipY - centerY;
+            double length = Math.Sqrt(dx * dx + dy * dy);
+            float normalX = length > 0 ? (float)(-dy / length) : 1;
+            float normalY = length > 0 ? (float)(dx / length) : 0;
+
             GraphicsPath tail = new GraphicsPath();
-            tail.AddLine(-tailWidth, 0, tailWidth, 0);
-            tail.AddLine(tailWidth, 0, 0, -tailLength);
+            tail.AddLine(centerX + normalX * tailWidth, centerY + normalY * tailWidth, centerX - normalX * tailWidth, centerY - normalY * tailWidth);
+            tail.AddLine(centerX - normalX * tailWidth, centerY - normalY * tailWidth, tipX, tipY);
             tail.CloseFigure();
-
-            int tailAngle = 90 + (int) GeometryHelper.Angle2D(rect.Left + rect.Width / 2, rect.Top + rect.Height / 2, TargetAdorner.Location.X, TargetAdorner.Location.Y);
-
-            using (Matrix tailMatrix = new Matrix())
-            {
-                tailMatrix.Translate(rect.Left + rect.Width / 2, rect.Top + rect.Height / 2);
-                tailMatrix.Rotate(tailAngle);
-                tail.Transform(tailMatrix);
-            }
-
             return tail;
+        }
+
+        /// <summary>
+        /// Explicitly set the location of the speech bubble tail gripper.
+        /// </summary>
+        public void SetTailLocation(NativePoint location)
+        {
+            if (TargetAdorner == null)
+            {
+                InitTargetAdorner(location);
+            }
+            else
+            {
+                TargetAdorner.Location = location;
+            }
+        }
+
+        public void SetTailLocation(int x, int y)
+        {
+            SetTailLocation(new NativePoint(x, y));
         }
 
         /// <summary>
@@ -237,7 +269,8 @@ namespace Greenshot.Editor.Drawing
         {
             if (TargetAdorner == null)
             {
-                return;
+                var rectInit = new NativeRect(Left, Top, Width, Height).Normalize();
+                InitTargetAdorner(new NativePoint(rectInit.Left - 20, rectInit.Bottom + 25));
             }
 
             graphics.SmoothingMode = SmoothingMode.HighQuality;
@@ -266,79 +299,82 @@ namespace Greenshot.Editor.Drawing
             //draw shadow first
             if (shadow && (lineVisible || Colors.IsVisible(fillColor)))
             {
-                const int basealpha = 100;
-                int alpha = basealpha;
-                const int steps = 5;
                 int currentStep = lineVisible ? 1 : 0;
                 using Matrix shadowMatrix = new Matrix();
                 using GraphicsPath bubbleClone = (GraphicsPath) bubble.Clone();
                 using GraphicsPath tailClone = (GraphicsPath) tail.Clone();
                 shadowMatrix.Translate(1, 1);
-                while (currentStep <= steps)
+                DrawShadow(lineThickness, (alpha, currentStep, shadowPen, nil) =>
                 {
-                    using (Pen shadowPen = new Pen(Color.FromArgb(alpha, 100, 100, 100)))
+                    tailClone.Transform(shadowMatrix);
+                    graphics.DrawPath(shadowPen, tailClone);
+                    bubbleClone.Transform(shadowMatrix);
+                    graphics.DrawPath(shadowPen, bubbleClone);
+
+                });
+            }
+
+            bool fillVisible = Colors.IsVisible(fillColor);
+            if (fillVisible && fillColor.A == 255)
+            {
+                // An opaque fill covers what the clip regions would hide, so the same picture is drawn without them:
+                // the bubble fill covers the tail border inside the bubble, the tail fill covers the bubble border inside the tail
+                using Pen pen = new Pen(lineColor, lineThickness);
+                using Brush brush = new SolidBrush(fillColor);
+                if (lineVisible)
+                {
+                    graphics.DrawPath(pen, tail);
+                }
+
+                graphics.FillPath(brush, bubble);
+                if (lineVisible)
+                {
+                    graphics.DrawPath(pen, bubble);
+                }
+
+                graphics.FillPath(brush, tail);
+            }
+            else if (lineVisible || fillVisible)
+            {
+                // Without a fill, or with one which lets the lines shine through, the clip regions keep the tail border out of the
+                // bubble and the bubble border out of the tail
+                using Pen pen = new Pen(lineColor, lineThickness);
+                using Brush brush = fillVisible ? new SolidBrush(fillColor) : null;
+                if (lineVisible)
+                {
+                    GraphicsState state = graphics.Save();
+                    // draw the tail border where the bubble is not visible
+                    using (Region clipRegion = new Region(bubble))
                     {
-                        shadowPen.Width = lineVisible ? lineThickness : 1;
-                        tailClone.Transform(shadowMatrix);
-                        graphics.DrawPath(shadowPen, tailClone);
-                        bubbleClone.Transform(shadowMatrix);
-                        graphics.DrawPath(shadowPen, bubbleClone);
+                        graphics.SetClip(clipRegion, CombineMode.Exclude);
+                        graphics.DrawPath(pen, tail);
                     }
 
-                    currentStep++;
-                    alpha -= basealpha / steps;
+                    graphics.Restore(state);
                 }
-            }
 
-            GraphicsState state = graphics.Save();
-            // draw the tail border where the bubble is not visible
-            using (Region clipRegion = new Region(bubble))
-            {
-                graphics.SetClip(clipRegion, CombineMode.Exclude);
-                using Pen pen = new Pen(lineColor, lineThickness);
-                graphics.DrawPath(pen, tail);
-            }
-
-            graphics.Restore(state);
-
-            if (Colors.IsVisible(fillColor))
-            {
-                //draw the bubbleshape
-                state = graphics.Save();
-                using (Brush brush = new SolidBrush(fillColor))
+                if (fillVisible)
                 {
                     graphics.FillPath(brush, bubble);
                 }
 
-                graphics.Restore(state);
-            }
-
-            if (lineVisible)
-            {
-                //draw the bubble border
-                state = graphics.Save();
-                // Draw bubble where the Tail is not visible.
-                using (Region clipRegion = new Region(tail))
+                if (lineVisible)
                 {
-                    graphics.SetClip(clipRegion, CombineMode.Exclude);
-                    using Pen pen = new Pen(lineColor, lineThickness);
-                    //pen.EndCap = pen.StartCap = LineCap.Round;
-                    graphics.DrawPath(pen, bubble);
+                    GraphicsState state = graphics.Save();
+                    // Draw bubble where the Tail is not visible.
+                    using (Region clipRegion = new Region(tail))
+                    {
+                        graphics.SetClip(clipRegion, CombineMode.Exclude);
+                        graphics.DrawPath(pen, bubble);
+                    }
+
+                    graphics.Restore(state);
                 }
 
-                graphics.Restore(state);
-            }
-
-            if (Colors.IsVisible(fillColor))
-            {
-                // Draw the tail border
-                state = graphics.Save();
-                using (Brush brush = new SolidBrush(fillColor))
+                if (fillVisible)
                 {
                     graphics.FillPath(brush, tail);
                 }
-
-                graphics.Restore(state);
             }
 
             // cleanup the paths

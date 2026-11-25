@@ -1,13 +1,13 @@
-﻿/*
+/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  *
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
@@ -21,51 +21,238 @@
 
 using System;
 using System.Globalization;
+using System.IO;
 using System.Net;
 using System.Reflection;
-using Greenshot.Forms;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using Dapplo.Ini;
+using Dapplo.Ini.Parsing;
+#if GREENSHOT_LIGHT
+using Dapplo.Ini.Interfaces;
+#else
+using Dapplo.Ini.WindowsPolicies;
+using Greenshot.Policies;
+#endif
+using Dapplo.Windows.Input.Keyboard;
+using Dapplo.Windows.Messages;
+using Greenshot.Base.Core;
+using Greenshot.Base.Recipes;
+using Greenshot.Configuration;
+using Greenshot.Editor.Configuration;
+using Greenshot.Helpers;
+using Greenshot.Shell;
+using Greenshot.Viewer;
+using Greenshot.Views;
+using log4net;
 
-namespace Greenshot
+namespace Greenshot;
+
+/// <summary>
+/// Description of Main.
+/// </summary>
+public class GreenshotMain
 {
-    /// <summary>
-    /// Description of Main.
-    /// </summary>
-    public class GreenshotMain
+    private static ILog LOG;
+    public static string LogFileLocation;
+    static GreenshotMain()
     {
-        static GreenshotMain()
-        {
-            AppDomain.CurrentDomain.AssemblyResolve += CurrentDomain_AssemblyResolve;
-        }
+        AppDomain.CurrentDomain.AssemblyResolve += CurrentDomain_AssemblyResolve;
+    }
 
-        private static Assembly CurrentDomain_AssemblyResolve(object sender, ResolveEventArgs args)
+    private static Assembly CurrentDomain_AssemblyResolve(object sender, ResolveEventArgs args)
+    {
+        Assembly ayResult = null;
+        string sShortAssemblyName = args.Name.Split(',')[0];
+        Assembly[] ayAssemblies = AppDomain.CurrentDomain.GetAssemblies();
+        foreach (Assembly ayAssembly in ayAssemblies)
         {
-            Assembly ayResult = null;
-            string sShortAssemblyName = args.Name.Split(',')[0];
-            Assembly[] ayAssemblies = AppDomain.CurrentDomain.GetAssemblies();
-            foreach (Assembly ayAssembly in ayAssemblies)
+            if (sShortAssemblyName != ayAssembly.FullName.Split(',')[0])
             {
-                if (sShortAssemblyName != ayAssembly.FullName.Split(',')[0])
-                {
-                    continue;
-                }
-
-                ayResult = ayAssembly;
-                break;
+                continue;
             }
 
-            return ayResult;
+            ayResult = ayAssembly;
+            break;
         }
 
-        [STAThread]
-        public static void Main(string[] args)
+        return ayResult;
+    }
+
+    [STAThread]
+    public static void Main(string[] args)
+    {
+        // Enable TLS 1.2 and 1.3 support only (TLS 1.0/1.1 deprecated per RFC 8996)
+        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls13;
+
+        Greenshot.Base.Languages.Texts.SystemLanguage = CultureInfo.CurrentUICulture.Name;
+
+        CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
+        CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
+
+        // Set the Thread name, is better than "1"
+        Thread.CurrentThread.Name = Application.ProductName;
+
+        // Init Log4NET
+        LogFileLocation = LogHelper.InitializeLog4Net();
+        // Get logger
+        LOG = LogManager.GetLogger(typeof(GreenshotMain));
+
+        Application.ThreadException += Application_ThreadException;
+        AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
+
+        TaskScheduler.UnobservedTaskException += Task_UnhandledException;
+
+        // Parse command-line arguments early so the optional --ini-directory override
+        // can be incorporated into the IniConfigRegistry search paths before Create().
+        // Returns null when --help was shown or a parse error occurred (exit immediately).
+        var options = GreenshotCommandLine.Parse(args);
+        if (options == null)
         {
-            // Enable TLS 1.2 support
-            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12;
+            return;
+        }
 
-            CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
-            CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
+#if !GREENSHOT_LIGHT
+        // The release build writes the policy templates with the sections of this installation, nothing else starts
+        if (options.PolicyTemplatesDirectory != null)
+        {
+            Environment.ExitCode = PolicyTemplates.WriteForInstallation(options.PolicyTemplatesDirectory) ? 0 : 1;
+            return;
+        }
+#endif
 
-            MainForm.Start(args);
+        // Register custom value converters (NativeRect, Color, etc.) before building the registry.
+        IniValueConverters.Register();
+        Editor.EditorInitialize.RegisterValueConverters();
+
+        // Detect PortableApp (PAF) mode: the App\Greenshot directory lives next to the executable.
+        var startupPath = AppContext.BaseDirectory;
+        var pafAppPath = Path.Combine(startupPath, @"App\Greenshot");
+        GreenshotEnvironment.IsPortable = Directory.Exists(pafAppPath);
+
+        // Build the IniConfigRegistry:
+        //   AddAppDataPath  → %APPDATA%\Greenshot
+        //   AddSearchPath   → installation / startup directory
+        //   SetOverrideDirectory → --ini-directory: greenshot.ini is only read from and saved to that directory
+        // Ensure any design-time / test fallback configuration is removed before production startup
+        IniConfigHelper.UnregisterDesignTimeConfig();
+
+        var builder = IniConfigRegistry.ForFile("greenshot.ini")
+
+            .AddAppDataPath("Greenshot")
+            .AddSearchPath(startupPath)
+            // Ignored when not given, the directory is created when missing and greenshot-fixed.ini is never read from it.
+            // An unusable directory is logged (IniListener.OnError) and the search paths are used instead.
+            .SetOverrideDirectory(options.IniDirectory);
+
+        builder.AddDefaultsFile("greenshot-defaults.ini")
+               .AddConstantsFile("greenshot-fixed.ini")
+               .WithWriterOptions(new IniWriterOptions
+               {
+                   AssignmentSeparator = "=",
+                   QuoteStyle = IniValueQuoteStyle.Never,
+                   EscapeSequences = false,
+                   WriteComments = true
+               })
+               .WithParserOptions(new IniParserOptions
+               {
+                   CaseSensitiveKeys = false,
+                   EscapeSequences = false,
+                   LineContinuation = false,
+                   QuotedValues = false
+               })
+               .RegisterSection<ICoreConfiguration>(new CoreConfigurationImpl())
+               .RegisterSection<IEditorConfiguration>(new EditorConfigurationImpl())
+               .RegisterSection<IWin10Configuration>(new Win10ConfigurationImpl())
+               .RegisterSection<IViewerConfiguration>(new ViewerConfigurationImpl())
+               .RegisterSection<IRecipeOptionsConfiguration>(new RecipeOptionsConfigurationImpl())
+               // Plugins register their sections after the file was read, they are filled from the retained file content.
+               // This also keeps the sections of plugins which are not loaded (excluded or uninstalled) when saving.
+               .AllowLateSectionRegistration()
+               .AutoSaveInterval(TimeSpan.FromSeconds(2))
+               .EmptyWhenNull()
+               .LockFile()
+               .EnableMetadata(applicationName: "Greenshot")
+               // greenshot.ini keeps only what the user set, inherited values are written as comments (Dapplo.Ini 2). A file
+               // written before holds every key: once, the values which equal the default become inherited again, so a
+               // changed default (greenshot-defaults.ini or a new version) reaches the user.
+               .ConvertUnchangedValuesToInherited()
+               // Also logs errors of the background work (auto-save, save on exit), which are only reported to listeners
+               .AddListener(new IniListener());
+
+#if GREENSHOT_LIGHT
+        // Greenshot Light, the small tray tool, starts with the LowMemory profile: below every value the user set, who can turn it up in the settings
+        builder.AddValueSource(new EditionDefaults(MemoryProfile.LowMemory), ValueSourceLayer.Default);
+#else
+        // Windows policies (Group Policy, Intune): HKLM/HKCU\SOFTWARE\Policies\Greenshot\Greenshot\<Section>\<Key> is mandatory (wins over
+        // greenshot-fixed.ini), ...\Recommended\<Section>\<Key> a default the user can change. Changes are picked up while Greenshot runs.
+        // See docs/vNext/policies.md
+        builder.AddWindowsPolicies(PolicyTemplates.Vendor, PolicyTemplates.Product);
+#endif
+
+        // No file access yet: greenshot.ini is read (and locked) in GreenshotApplication.Start, only by the instance which really runs.
+        // A second instance, which forwards a command or reports that Greenshot is running, doesn't touch the file.
+        var iniConfig = builder.Create();
+        if (iniConfig.OverrideDirectory != null)
+        {
+            LOG.Info($"Using the ini-directory {iniConfig.OverrideDirectory}");
+        }
+
+        // An exception in a window message or keyboard hook subscriber ends that subscription instead of crashing the process,
+        // log it: otherwise a clipboard listener or the hotkeys just stop working without a trace.
+        SharedMessageWindow.SubscriberErrors.Subscribe(ex => LOG.Error("A window message subscriber failed and was removed.", ex));
+        KeyboardHook.SubscriberErrors.Subscribe(ex => LOG.Error("A keyboard hook subscriber failed and was removed.", ex));
+
+        // Log the startup
+        LOG.Info("Starting: " + EnvironmentInfo.EnvironmentToString(false));
+
+        GreenshotApplication.Start(options);
+    }
+
+    internal static void Application_ThreadException(object sender, ThreadExceptionEventArgs e)
+    {
+        Exception exceptionToLog = e.Exception;
+        string exceptionText = EnvironmentInfo.BuildReport(exceptionToLog);
+        LOG.Error("Exception caught in the ThreadException handler.");
+        LOG.Error(exceptionText);
+        if (exceptionText != null && exceptionText.Contains("InputLanguageChangedEventArgs"))
+        {
+            // Ignore for BUG-1809
+            return;
+        }
+
+        BugReportWindow.ShowReport(exceptionToLog, exceptionText);
+    }
+
+    internal static void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        Exception exceptionToLog = e.ExceptionObject as Exception;
+        string exceptionText = EnvironmentInfo.BuildReport(exceptionToLog);
+        LOG.Error("Exception caught in the UnhandledException handler.");
+        LOG.Error(exceptionText);
+        if (exceptionText != null && exceptionText.Contains("InputLanguageChangedEventArgs"))
+        {
+            // Ignore for BUG-1809
+            return;
+        }
+
+        BugReportWindow.ShowReport(exceptionToLog, exceptionText, e.IsTerminating);
+    }
+
+    internal static void Task_UnhandledException(object sender, UnobservedTaskExceptionEventArgs args)
+    {
+        try
+        {
+            Exception exceptionToLog = args.Exception;
+            string exceptionText = EnvironmentInfo.BuildReport(exceptionToLog);
+            LOG.Error("Exception caught in the UnobservedTaskException handler.");
+            LOG.Error(exceptionText);
+            BugReportWindow.ShowReport(exceptionToLog, exceptionText);
+        }
+        finally
+        {
+            args.SetObserved();
         }
     }
 }

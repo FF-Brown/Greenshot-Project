@@ -1,0 +1,4330 @@
+using System;
+using Greenshot.Base.Controls;
+using System.Collections;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Windows;
+using System.Windows.Input;
+using Greenshot.Base.Languages;
+using Greenshot.Base.Interfaces.Drawing;
+using Greenshot.Base.Interfaces.Forms;
+using Greenshot.Base.Recipes;
+using Greenshot.Base.Recipes.Pipeline;
+using Greenshot.Base.Wpf;
+using Greenshot.Editor.Views;
+using Greenshot.Plugin.RecipeEditor.Helpers;
+using Greenshot.Plugin.RecipeEditor.Views;
+
+namespace Greenshot.Plugin.RecipeEditor.ViewModels
+{
+    public class StepPortViewModel : ViewModelBase
+    {
+        private Point _anchor;
+        private bool _isConnected;
+        private string _title;
+
+        public StepNodeViewModel Node { get; }
+        public bool IsInput { get; }
+        public bool IsConditional => Node?.IsConditional ?? false;
+        public bool HasDynamicOutputPorts => Node?.HasDynamicOutputPorts ?? false;
+
+        public Point Anchor
+        {
+            get => _anchor;
+            set => SetField(ref _anchor, value);
+        }
+
+        public bool IsConnected
+        {
+            get => _isConnected;
+            set => SetField(ref _isConnected, value);
+        }
+
+        public string Title
+        {
+            get => _title ?? (IsInput ? Texts.Get<IRecipeEditorLanguage>().NodeIn : Texts.Get<IRecipeEditorLanguage>().NodeOut);
+            set => SetField(ref _title, value);
+        }
+
+        public StepPortViewModel(StepNodeViewModel node, bool isInput, string title = null)
+        {
+            Node = node;
+            IsInput = isInput;
+            _title = title;
+        }
+    }
+
+    public class ConditionBranchViewModel : ViewModelBase
+    {
+        private string _key;
+        private string _expression;
+        private readonly Action _onChanged;
+        private readonly Action<ConditionBranchViewModel> _onRemove;
+
+        public StepPortViewModel Port { get; }
+
+        public string Key
+        {
+            get => _key;
+            set
+            {
+                if (SetField(ref _key, value))
+                {
+                    if (Port != null) Port.Title = value;
+                    _onChanged?.Invoke();
+                }
+            }
+        }
+
+        public string Expression
+        {
+            get => _expression;
+            set
+            {
+                if (SetField(ref _expression, value))
+                {
+                    _onChanged?.Invoke();
+                }
+            }
+        }
+
+        public ICommand RemoveCommand { get; }
+
+        /// <summary>
+        /// Takes the values of the branch with the same key from the settings of the node, keeping this view model and its pin
+        /// </summary>
+        internal void Apply(ConditionalBranch branch)
+        {
+            if (!string.Equals(_expression, branch.Expression, StringComparison.Ordinal))
+            {
+                _expression = branch.Expression ?? "${true}";
+                OnPropertyChanged(nameof(Expression));
+            }
+        }
+
+        public ConditionBranchViewModel(string key, string expression, StepNodeViewModel node, Action onChanged = null, Action<ConditionBranchViewModel> onRemove = null)
+        {
+            _key = key ?? "A";
+            _expression = expression ?? "${true}";
+            _onChanged = onChanged;
+            _onRemove = onRemove;
+            Port = new StepPortViewModel(node, isInput: false, title: _key);
+            RemoveCommand = new RelayCommand(() => _onRemove?.Invoke(this));
+        }
+    }
+
+    public class PromptChoiceViewModel : ViewModelBase
+    {
+        private string _key;
+        private string _label;
+        private string _style = "Primary";
+        private bool _isDefault;
+        private bool _isCancel;
+        private readonly Action _onChanged;
+        private readonly Action<PromptChoiceViewModel> _onRemove;
+        private readonly StepNodeViewModel _node;
+
+        public StepPortViewModel Port { get; }
+
+        public string Key
+        {
+            get => _key;
+            set
+            {
+                if (SetField(ref _key, value))
+                {
+                    if (Port != null) Port.Title = value;
+                    _onChanged?.Invoke();
+                }
+            }
+        }
+
+        public string Label
+        {
+            get => _label;
+            set
+            {
+                if (SetField(ref _label, value))
+                {
+                    _onChanged?.Invoke();
+                }
+            }
+        }
+
+        public string Style
+        {
+            get => _style;
+            set
+            {
+                if (SetField(ref _style, value))
+                {
+                    _onChanged?.Invoke();
+                }
+            }
+        }
+
+        /// <summary>
+        /// The answer to Enter and when the prompt times out: one choice at most
+        /// </summary>
+        public bool IsDefault
+        {
+            get => _isDefault;
+            set
+            {
+                if (SetField(ref _isDefault, value))
+                {
+                    if (value && _node != null)
+                    {
+                        foreach (var other in _node.PromptChoices.Where(c => c != this))
+                        {
+                            other.IsDefault = false;
+                        }
+                    }
+                    _onChanged?.Invoke();
+                }
+            }
+        }
+
+        /// <summary>
+        /// The answer to Escape and closing the prompt: one choice at most
+        /// </summary>
+        public bool IsCancel
+        {
+            get => _isCancel;
+            set
+            {
+                if (SetField(ref _isCancel, value))
+                {
+                    if (value && _node != null)
+                    {
+                        foreach (var other in _node.PromptChoices.Where(c => c != this))
+                        {
+                            other.IsCancel = false;
+                        }
+                    }
+                    _onChanged?.Invoke();
+                }
+            }
+        }
+
+        public ICommand RemoveCommand { get; }
+
+        public PromptChoiceViewModel(string key, string label, string style, bool isDefault, bool isCancel, StepNodeViewModel node, Action onChanged = null, Action<PromptChoiceViewModel> onRemove = null)
+        {
+            _key = key ?? "Yes";
+            _label = label ?? key;
+            _style = style ?? "Primary";
+            _isDefault = isDefault;
+            _isCancel = isCancel;
+            _onChanged = onChanged;
+            _onRemove = onRemove;
+            _node = node;
+            Port = new StepPortViewModel(node, isInput: false, title: _key);
+            RemoveCommand = new RelayCommand(() => _onRemove?.Invoke(this));
+        }
+
+        public PromptChoice ToPromptChoice() => new PromptChoice(Key, Label, Style, IsDefault, IsCancel);
+
+        /// <summary>
+        /// Takes the values of the choice with the same key from the settings of the node, keeping this view model and its pin
+        /// </summary>
+        internal void Apply(PromptChoice choice)
+        {
+            string label = choice.Label ?? choice.Key;
+            string style = choice.Style ?? "Primary";
+            if (!string.Equals(_label, label, StringComparison.Ordinal))
+            {
+                _label = label;
+                OnPropertyChanged(nameof(Label));
+            }
+            if (!string.Equals(_style, style, StringComparison.Ordinal))
+            {
+                _style = style;
+                OnPropertyChanged(nameof(Style));
+            }
+            if (_isDefault != choice.IsDefault)
+            {
+                _isDefault = choice.IsDefault;
+                OnPropertyChanged(nameof(IsDefault));
+            }
+            if (_isCancel != choice.IsCancel)
+            {
+                _isCancel = choice.IsCancel;
+                OnPropertyChanged(nameof(IsCancel));
+            }
+        }
+    }
+
+    public class VariableItemViewModel : ViewModelBase
+    {
+        private string _key;
+        private string _value;
+        private readonly Action _onChanged;
+
+        public string Key
+        {
+            get => _key;
+            set { if (SetField(ref _key, value)) _onChanged?.Invoke(); }
+        }
+
+        public string Value
+        {
+            get => _value;
+            set { if (SetField(ref _value, value)) _onChanged?.Invoke(); }
+        }
+
+        public ICommand RemoveCommand { get; }
+
+        public VariableItemViewModel(string key, string value, Action onChanged = null, Action<VariableItemViewModel> onRemove = null)
+        {
+            _key = key;
+            _value = value;
+            _onChanged = onChanged;
+            RemoveCommand = new RelayCommand(() => onRemove?.Invoke(this));
+        }
+    }
+
+    public class DrawableItemViewModel : ViewModelBase
+    {
+        private string _type = "Rectangle";
+        private string _text = "";
+        private string _emoji = "🛡️";
+        private string _horizontalAnchor = "None";
+        private string _verticalAnchor = "None";
+        private string _width = "200";
+        private string _height = "40";
+        private string _offsetX = "0";
+        private string _offsetY = "0";
+        private string _fillColor = "transparent";
+        private string _lineColor = "#FF0000";
+        private int _lineThickness = 2;
+        private bool _shadow = true;
+        private string _fontFamily = "Segoe UI";
+        private double _fontSize = 12.0;
+        private bool _fontBold = false;
+        private bool _fontItalic = false;
+        private string _textAlignment = "Center";
+        private string _arrowHeads = "END_POINT";
+        private int _stepNumber = 1;
+        private int _blurRadius = 10;
+        private int _pixelSize = 5;
+        private int _magnificationFactor = 2;
+        private string _foreColor = "#000000";
+        private string _backColor = "#FFFFFF";
+        private bool _roundedDots = false;
+        private int _quietZone = 1;
+        private string _tailDirection = "BottomLeft";
+        private string _tailOffsetX = "0";
+        private string _tailOffsetY = "0";
+
+        // Image, SVG & Cursor fields
+        private string _filePath = "";
+        private string _imageData = "";
+        private string _assetStorageMode = "Embed";
+        private string _cursorName = "Arrow";
+
+        // Aspect ratio tracking & parameters store
+        private double _aspectRatio = 1.0;
+        private bool? _lockAspectRatio;
+        private readonly Dictionary<string, object> _parameters = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
+        private readonly Action _onChanged;
+
+        public static IReadOnlyList<string> AvailableFontFamilies { get; } = GetAvailableFonts();
+        public static IReadOnlyList<string> AvailableTextAlignments { get; } = new[] { "Left", "Center", "Right" };
+        public static IReadOnlyList<string> AvailableArrowHeads { get; } = new[] { "END_POINT", "START_POINT", "BOTH", "NONE" };
+        public static IReadOnlyList<string> AvailableCursors { get; } = new[] { "AppStarting", "Arrow", "Cross", "Hand", "Help", "IBeam", "No", "SizeAll", "SizeNESW", "SizeNS", "SizeNWSE", "SizeWE", "UpArrow", "Wait" };
+
+        private static List<string> GetAvailableFonts()
+        {
+            try
+            {
+                var fonts = System.Windows.Media.Fonts.SystemFontFamilies
+                    .Select(f => f.Source)
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .OrderBy(s => s)
+                    .ToList();
+                if (fonts.Count > 0) return fonts;
+            }
+            catch { }
+            return new List<string> { "Arial", "Calibri", "Comic Sans MS", "Consolas", "Courier New", "Georgia", "Impact", "Lucida Console", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana" };
+        }
+
+        public string Type
+        {
+            get => _type;
+            set
+            {
+                if (SetField(ref _type, value))
+                {
+                    _lockAspectRatio = null;
+                    bool isRational = (RecipeDrawableRegistry.Instance.GetScaleOptions(value) & ScaleOptions.Rational) == ScaleOptions.Rational;
+                    if (isRational)
+                    {
+                        _aspectRatio = 1.0;
+                        if (_width != _height || _height == "40")
+                        {
+                            if (string.Equals(value, "StepLabel", StringComparison.OrdinalIgnoreCase))
+                            {
+                                _width = "28";
+                                _height = "28";
+                            }
+                            else if (string.Equals(value, "Emoji", StringComparison.OrdinalIgnoreCase))
+                            {
+                                _width = "32";
+                                _height = "32";
+                            }
+                            else
+                            {
+                                _width = "150";
+                                _height = "150";
+                            }
+                            OnPropertyChanged(nameof(Width));
+                            OnPropertyChanged(nameof(Height));
+                        }
+                    }
+                    else if (IsImageType && (_width == "200" && _height == "40"))
+                    {
+                        _width = "120";
+                        _height = "120";
+                        _aspectRatio = 1.0;
+                        OnPropertyChanged(nameof(Width));
+                        OnPropertyChanged(nameof(Height));
+                    }
+
+                    _onChanged?.Invoke();
+                    OnPropertyChanged(nameof(IsTextType));
+                    OnPropertyChanged(nameof(IsEmojiType));
+                    OnPropertyChanged(nameof(IsSpeechbubbleType));
+                    OnPropertyChanged(nameof(IsQrCodeType));
+                    OnPropertyChanged(nameof(IsImageType));
+                    OnPropertyChanged(nameof(IsCursorType));
+                    OnPropertyChanged(nameof(IsStepLabelType));
+                    OnPropertyChanged(nameof(IsArrowType));
+                    OnPropertyChanged(nameof(IsBlurType));
+                    OnPropertyChanged(nameof(IsPixelizeType));
+                    OnPropertyChanged(nameof(IsObfuscateType));
+                    OnPropertyChanged(nameof(IsHighlightType));
+                    OnPropertyChanged(nameof(IsMagnifyType));
+                    OnPropertyChanged(nameof(HasFontSettings));
+                    OnPropertyChanged(nameof(HasLineThickness));
+                    OnPropertyChanged(nameof(HasShadow));
+                    OnPropertyChanged(nameof(HasFillColor));
+                    OnPropertyChanged(nameof(HasLineColor));
+                    OnPropertyChanged(nameof(HasAnyStandardColor));
+                    OnPropertyChanged(nameof(FillColorLabel));
+                    OnPropertyChanged(nameof(LineColorLabel));
+                    OnPropertyChanged(nameof(LockAspectRatio));
+                    OnPropertyChanged(nameof(CanConfigure));
+                    OnPropertyChanged(nameof(ConfigurationSummary));
+                }
+            }
+        }
+
+        private bool IsKnownNonColorType => IsQrCodeType || IsObfuscateType || IsMagnifyType || IsEmojiType || IsImageType || IsCursorType;
+
+        public bool IsTextType => string.Equals(_type, "Text", StringComparison.OrdinalIgnoreCase) ||
+                                  string.Equals(_type, "Speechbubble", StringComparison.OrdinalIgnoreCase) ||
+                                  string.Equals(_type, "Watermark", StringComparison.OrdinalIgnoreCase);
+
+        public bool IsQrCodeType => string.Equals(_type, "QRCode", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(_type, "Barcode", StringComparison.OrdinalIgnoreCase);
+
+        public bool IsEmojiType => string.Equals(_type, "Emoji", StringComparison.OrdinalIgnoreCase) ||
+                                   string.Equals(_type, "Icon", StringComparison.OrdinalIgnoreCase);
+
+        public bool IsSpeechbubbleType => string.Equals(_type, "Speechbubble", StringComparison.OrdinalIgnoreCase);
+
+        public bool IsImageType => string.Equals(_type, "Image", StringComparison.OrdinalIgnoreCase);
+
+
+        public bool IsCursorType => string.Equals(_type, "Cursor", StringComparison.OrdinalIgnoreCase);
+
+        public bool IsStepLabelType => string.Equals(_type, "StepLabel", StringComparison.OrdinalIgnoreCase);
+
+        public bool IsArrowType => string.Equals(_type, "Arrow", StringComparison.OrdinalIgnoreCase);
+
+        public bool IsBlurType => string.Equals(_type, "Blur", StringComparison.OrdinalIgnoreCase);
+
+        public bool IsPixelizeType => string.Equals(_type, "Pixelize", StringComparison.OrdinalIgnoreCase);
+
+        public bool IsObfuscateType => IsBlurType || IsPixelizeType;
+
+        public bool IsHighlightType => string.Equals(_type, "Highlight", StringComparison.OrdinalIgnoreCase);
+
+        public bool IsMagnifyType => string.Equals(_type, "Magnify", StringComparison.OrdinalIgnoreCase);
+
+        public bool HasFontSettings => string.Equals(_type, "Text", StringComparison.OrdinalIgnoreCase) ||
+                                       string.Equals(_type, "Speechbubble", StringComparison.OrdinalIgnoreCase);
+
+        public bool HasLineThickness => string.Equals(_type, "Rectangle", StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(_type, "Ellipse", StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(_type, "Line", StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(_type, "Arrow", StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(_type, "Freehand", StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(_type, "Text", StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(_type, "Speechbubble", StringComparison.OrdinalIgnoreCase);
+
+        public bool HasShadow => string.Equals(_type, "Rectangle", StringComparison.OrdinalIgnoreCase) ||
+                                 string.Equals(_type, "Ellipse", StringComparison.OrdinalIgnoreCase) ||
+                                 string.Equals(_type, "Line", StringComparison.OrdinalIgnoreCase) ||
+                                 string.Equals(_type, "Arrow", StringComparison.OrdinalIgnoreCase) ||
+                                 string.Equals(_type, "Freehand", StringComparison.OrdinalIgnoreCase) ||
+                                 string.Equals(_type, "Text", StringComparison.OrdinalIgnoreCase) ||
+                                 string.Equals(_type, "Speechbubble", StringComparison.OrdinalIgnoreCase) ||
+                                 string.Equals(_type, "StepLabel", StringComparison.OrdinalIgnoreCase) ||
+                                 string.Equals(_type, "Image", StringComparison.OrdinalIgnoreCase);
+
+        public bool HasFillColor => string.Equals(_type, "Rectangle", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(_type, "Ellipse", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(_type, "Text", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(_type, "Speechbubble", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(_type, "StepLabel", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(_type, "Highlight", StringComparison.OrdinalIgnoreCase) ||
+                                    (!IsKnownNonColorType && !string.Equals(_type, "Line", StringComparison.OrdinalIgnoreCase) && !string.Equals(_type, "Arrow", StringComparison.OrdinalIgnoreCase) && !string.Equals(_type, "Freehand", StringComparison.OrdinalIgnoreCase));
+
+        public bool HasLineColor => string.Equals(_type, "Rectangle", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(_type, "Ellipse", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(_type, "Line", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(_type, "Arrow", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(_type, "Freehand", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(_type, "Text", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(_type, "Speechbubble", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(_type, "StepLabel", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(_type, "Highlight", StringComparison.OrdinalIgnoreCase) ||
+                                    !IsKnownNonColorType;
+
+        public bool HasAnyStandardColor => !IsQrCodeType && (HasFillColor || HasLineColor);
+
+        public string FillColorLabel => IsStepLabelType ? Texts.Get<IRecipeEditorLanguage>().ColorCircle :
+                                        IsHighlightType ? Texts.Get<IRecipeEditorLanguage>().ColorHighlight :
+                                        IsTextType ? Texts.Get<IRecipeEditorLanguage>().ColorBackground : Texts.Get<IRecipeEditorLanguage>().ColorFill;
+
+        public string LineColorLabel => IsStepLabelType ? Texts.Get<IRecipeEditorLanguage>().ColorNumber :
+                                        IsTextType ? Texts.Get<IRecipeEditorLanguage>().ColorText : Texts.Get<IRecipeEditorLanguage>().ColorLine;
+
+        public bool CanConfigure => RecipeDrawableRegistry.Instance.CanConfigureDrawable(_type);
+
+        public string ConfigurationSummary
+        {
+            get
+            {
+                if (string.Equals(_type, "QRCode", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(_type, "Barcode", StringComparison.OrdinalIgnoreCase))
+                {
+                    string cat = _parameters.TryGetValue("QrType", out var q) && q != null ? q.ToString() : Texts.Get<IRecipeEditorLanguage>().QrLinkText;
+                    string txt = _parameters.TryGetValue("Text", out var t) && t != null ? t.ToString() : _text;
+                    string dots = _parameters.TryGetValue("RoundedDots", out var rd) && rd is bool b && b ? " • " + Texts.Get<IRecipeEditorLanguage>().QrRoundedDots : "";
+                    if (!string.IsNullOrWhiteSpace(txt))
+                    {
+                        if (txt.Length > 35) txt = txt.Substring(0, 32) + "...";
+                        return $"{cat}: {txt}{dots}";
+                    }
+                    return $"{cat}{dots}";
+                }
+
+                if (_parameters.Count > 0)
+                {
+                    return string.Format(Texts.Get<IRecipeEditorLanguage>().AnnotationCustomParameters, _parameters.Count);
+                }
+
+                return Texts.Get<IRecipeEditorLanguage>().AnnotationDefaultConfiguration;
+            }
+        }
+
+        public IDictionary<string, object> Parameters => _parameters;
+
+        public bool LockAspectRatio
+        {
+            get => _lockAspectRatio ?? ((RecipeDrawableRegistry.Instance.GetScaleOptions(_type) & ScaleOptions.Rational) == ScaleOptions.Rational);
+            set
+            {
+                if (SetField(ref _lockAspectRatio, value))
+                {
+                    if (value)
+                    {
+                        if (double.TryParse(_width, out double w) && double.TryParse(_height, out double h) && w > 0 && h > 0)
+                        {
+                            _aspectRatio = w / h;
+                        }
+                        else
+                        {
+                            _aspectRatio = 1.0;
+                        }
+                    }
+                    _onChanged?.Invoke();
+                }
+            }
+        }
+
+        public string Width
+        {
+            get => _width;
+            set
+            {
+                if (SetField(ref _width, value))
+                {
+                    if (LockAspectRatio && double.TryParse(value, out double w) && w > 0)
+                    {
+                        if (_aspectRatio <= 0.0001) _aspectRatio = 1.0;
+                        int newH = Math.Max(1, (int)Math.Round(w / _aspectRatio));
+                        if (_height != newH.ToString())
+                        {
+                            SetField(ref _height, newH.ToString(), nameof(Height));
+                        }
+                    }
+                    _onChanged?.Invoke();
+                }
+            }
+        }
+
+        public string Height
+        {
+            get => _height;
+            set
+            {
+                if (SetField(ref _height, value))
+                {
+                    if (LockAspectRatio && double.TryParse(value, out double h) && h > 0)
+                    {
+                        if (_aspectRatio <= 0.0001) _aspectRatio = 1.0;
+                        int newW = Math.Max(1, (int)Math.Round(h * _aspectRatio));
+                        if (_width != newW.ToString())
+                        {
+                            SetField(ref _width, newW.ToString(), nameof(Width));
+                        }
+                    }
+                    _onChanged?.Invoke();
+                }
+            }
+        }
+
+        public string TailDirection
+        {
+            get => _tailDirection;
+            set { if (SetField(ref _tailDirection, value)) _onChanged?.Invoke(); }
+        }
+
+        public string TailOffsetX
+        {
+            get => _tailOffsetX;
+            set { if (SetField(ref _tailOffsetX, value)) _onChanged?.Invoke(); }
+        }
+
+        public string TailOffsetY
+        {
+            get => _tailOffsetY;
+            set { if (SetField(ref _tailOffsetY, value)) _onChanged?.Invoke(); }
+        }
+
+        public string Text
+        {
+            get => _text;
+            set
+            {
+                if (SetField(ref _text, value))
+                {
+                    _parameters["Text"] = value;
+                    if (IsStepLabelType && int.TryParse(value, out int parsedNum))
+                    {
+                        _stepNumber = parsedNum;
+                        OnPropertyChanged(nameof(StepNumber));
+                    }
+                    _onChanged?.Invoke();
+                    OnPropertyChanged(nameof(ConfigurationSummary));
+                }
+            }
+        }
+
+        public string Emoji
+        {
+            get => _emoji;
+            set { if (SetField(ref _emoji, value)) _onChanged?.Invoke(); }
+        }
+
+        public string HorizontalAnchor
+        {
+            get => _horizontalAnchor;
+            set { if (SetField(ref _horizontalAnchor, value)) _onChanged?.Invoke(); }
+        }
+
+        public string VerticalAnchor
+        {
+            get => _verticalAnchor;
+            set { if (SetField(ref _verticalAnchor, value)) _onChanged?.Invoke(); }
+        }
+
+        public string FilePath
+        {
+            get => _filePath;
+            set
+            {
+                if (SetField(ref _filePath, value))
+                {
+                    OnPropertyChanged(nameof(HasLinkedFile));
+                    OnPropertyChanged(nameof(SourceSummaryBadge));
+                    _onChanged?.Invoke();
+                }
+            }
+        }
+
+        public string ImageData
+        {
+            get => _imageData;
+            set
+            {
+                if (SetField(ref _imageData, value))
+                {
+                    OnPropertyChanged(nameof(HasEmbeddedData));
+                    OnPropertyChanged(nameof(SourceSummaryBadge));
+                    _onChanged?.Invoke();
+                }
+            }
+        }
+
+        public bool HasEmbeddedData => !string.IsNullOrEmpty(_imageData);
+        public bool HasLinkedFile => !string.IsNullOrEmpty(_filePath);
+
+        public string AssetStorageMode
+        {
+            get => _assetStorageMode;
+            set
+            {
+                if (SetField(ref _assetStorageMode, value))
+                {
+                    OnPropertyChanged(nameof(IsEmbedMode));
+                    OnPropertyChanged(nameof(IsLinkMode));
+                    OnPropertyChanged(nameof(IsCursorPresetMode));
+                    OnPropertyChanged(nameof(IsCursorEmbedMode));
+                    OnPropertyChanged(nameof(IsCursorLinkMode));
+                    OnPropertyChanged(nameof(SourceSummaryBadge));
+                    _onChanged?.Invoke();
+                }
+            }
+        }
+
+        public bool IsEmbedMode
+        {
+            get => string.Equals(_assetStorageMode, "Embed", StringComparison.OrdinalIgnoreCase) || (HasEmbeddedData && !HasLinkedFile);
+            set { if (value) AssetStorageMode = "Embed"; }
+        }
+
+        public bool IsLinkMode
+        {
+            get => string.Equals(_assetStorageMode, "Link", StringComparison.OrdinalIgnoreCase) || (HasLinkedFile && !HasEmbeddedData);
+            set { if (value) AssetStorageMode = "Link"; }
+        }
+
+        public bool IsCursorPresetMode
+        {
+            get => IsCursorType && !HasEmbeddedData && !HasLinkedFile;
+            set
+            {
+                if (value && IsCursorType)
+                {
+                    _imageData = null;
+                    _filePath = null;
+                    _assetStorageMode = "Preset";
+                    if (string.IsNullOrEmpty(_cursorName)) _cursorName = "Arrow";
+                    OnPropertyChanged(nameof(ImageData));
+                    OnPropertyChanged(nameof(FilePath));
+                    OnPropertyChanged(nameof(CursorName));
+                    OnPropertyChanged(nameof(HasEmbeddedData));
+                    OnPropertyChanged(nameof(HasLinkedFile));
+                    OnPropertyChanged(nameof(IsCursorPresetMode));
+                    OnPropertyChanged(nameof(IsCursorEmbedMode));
+                    OnPropertyChanged(nameof(IsCursorLinkMode));
+                    OnPropertyChanged(nameof(SourceSummaryBadge));
+                    _onChanged?.Invoke();
+                }
+            }
+        }
+
+        public bool IsCursorEmbedMode
+        {
+            get => IsCursorType && HasEmbeddedData;
+            set
+            {
+                if (value && IsCursorType)
+                {
+                    _filePath = null;
+                    _assetStorageMode = "Embed";
+                    OnPropertyChanged(nameof(FilePath));
+                    OnPropertyChanged(nameof(HasEmbeddedData));
+                    OnPropertyChanged(nameof(HasLinkedFile));
+                    OnPropertyChanged(nameof(IsCursorPresetMode));
+                    OnPropertyChanged(nameof(IsCursorEmbedMode));
+                    OnPropertyChanged(nameof(IsCursorLinkMode));
+                    OnPropertyChanged(nameof(SourceSummaryBadge));
+                    _onChanged?.Invoke();
+                }
+            }
+        }
+
+        public bool IsCursorLinkMode
+        {
+            get => IsCursorType && HasLinkedFile;
+            set
+            {
+                if (value && IsCursorType)
+                {
+                    _imageData = null;
+                    _assetStorageMode = "Link";
+                    OnPropertyChanged(nameof(ImageData));
+                    OnPropertyChanged(nameof(HasEmbeddedData));
+                    OnPropertyChanged(nameof(HasLinkedFile));
+                    OnPropertyChanged(nameof(IsCursorPresetMode));
+                    OnPropertyChanged(nameof(IsCursorEmbedMode));
+                    OnPropertyChanged(nameof(IsCursorLinkMode));
+                    OnPropertyChanged(nameof(SourceSummaryBadge));
+                    _onChanged?.Invoke();
+                }
+            }
+        }
+
+        public string SourceSummaryBadge
+        {
+            get
+            {
+                if (IsCursorType)
+                {
+                    if (HasEmbeddedData) return "📦 " + Texts.Get<IRecipeEditorLanguage>().AssetEmbeddedCursor;
+                    if (HasLinkedFile) return $"🔗 {Path.GetFileName(_filePath)}";
+                    return string.Format(Texts.Get<IRecipeEditorLanguage>().AssetCursorPreset, _cursorName ?? "Arrow");
+                }
+                if (IsImageType)
+                {
+                    if (HasEmbeddedData) return "📦 " + Texts.Get<IRecipeEditorLanguage>().AssetEmbeddedImage;
+                    if (HasLinkedFile) return $"🔗 {Path.GetFileName(_filePath)}";
+                    return "";
+                }
+                return "";
+            }
+        }
+
+        public string CursorName
+        {
+            get => _cursorName;
+            set
+            {
+                if (SetField(ref _cursorName, value))
+                {
+                    _parameters["CursorName"] = value;
+                    OnPropertyChanged(nameof(SourceSummaryBadge));
+                    _onChanged?.Invoke();
+                }
+            }
+        }
+
+        public string OffsetX
+        {
+            get => _offsetX;
+            set { if (SetField(ref _offsetX, value)) _onChanged?.Invoke(); }
+        }
+
+        public string OffsetY
+        {
+            get => _offsetY;
+            set { if (SetField(ref _offsetY, value)) _onChanged?.Invoke(); }
+        }
+
+        public string FillColor
+        {
+            get => _fillColor;
+            set { if (SetField(ref _fillColor, value)) _onChanged?.Invoke(); }
+        }
+
+        public string LineColor
+        {
+            get => _lineColor;
+            set { if (SetField(ref _lineColor, value)) _onChanged?.Invoke(); }
+        }
+
+        public int LineThickness
+        {
+            get => _lineThickness;
+            set { if (SetField(ref _lineThickness, value)) _onChanged?.Invoke(); }
+        }
+
+        public bool Shadow
+        {
+            get => _shadow;
+            set { if (SetField(ref _shadow, value)) _onChanged?.Invoke(); }
+        }
+
+        public string FontFamily
+        {
+            get => _fontFamily;
+            set { if (SetField(ref _fontFamily, value)) _onChanged?.Invoke(); }
+        }
+
+        public double FontSize
+        {
+            get => _fontSize;
+            set { if (SetField(ref _fontSize, value)) _onChanged?.Invoke(); }
+        }
+
+        public bool FontBold
+        {
+            get => _fontBold;
+            set { if (SetField(ref _fontBold, value)) _onChanged?.Invoke(); }
+        }
+
+        public bool FontItalic
+        {
+            get => _fontItalic;
+            set { if (SetField(ref _fontItalic, value)) _onChanged?.Invoke(); }
+        }
+
+        public string TextAlignment
+        {
+            get => _textAlignment;
+            set { if (SetField(ref _textAlignment, value)) _onChanged?.Invoke(); }
+        }
+
+        public string ArrowHeads
+        {
+            get => _arrowHeads;
+            set { if (SetField(ref _arrowHeads, value)) _onChanged?.Invoke(); }
+        }
+
+        public int StepNumber
+        {
+            get => _stepNumber;
+            set
+            {
+                if (SetField(ref _stepNumber, value))
+                {
+                    if (IsStepLabelType)
+                    {
+                        _text = value.ToString();
+                        OnPropertyChanged(nameof(Text));
+                    }
+                    _onChanged?.Invoke();
+                }
+            }
+        }
+
+        public int BlurRadius
+        {
+            get => _blurRadius;
+            set { if (SetField(ref _blurRadius, value)) _onChanged?.Invoke(); }
+        }
+
+        public int PixelSize
+        {
+            get => _pixelSize;
+            set { if (SetField(ref _pixelSize, value)) _onChanged?.Invoke(); }
+        }
+
+        public int MagnificationFactor
+        {
+            get => _magnificationFactor;
+            set { if (SetField(ref _magnificationFactor, value)) _onChanged?.Invoke(); }
+        }
+
+        public string ForeColor
+        {
+            get => _foreColor;
+            set { if (SetField(ref _foreColor, value)) { _parameters["ForeColor"] = value; _onChanged?.Invoke(); } }
+        }
+
+        public string BackColor
+        {
+            get => _backColor;
+            set { if (SetField(ref _backColor, value)) { _parameters["BackColor"] = value; _onChanged?.Invoke(); } }
+        }
+
+        public bool RoundedDots
+        {
+            get => _roundedDots;
+            set { if (SetField(ref _roundedDots, value)) { _parameters["RoundedDots"] = value; OnPropertyChanged(nameof(ConfigurationSummary)); _onChanged?.Invoke(); } }
+        }
+
+        public int QuietZone
+        {
+            get => _quietZone;
+            set { if (SetField(ref _quietZone, value)) { _parameters["QuietZone"] = value; _onChanged?.Invoke(); } }
+        }
+
+        public ICommand RemoveCommand { get; }
+        public ICommand PickFillColorCommand { get; }
+        public ICommand PickLineColorCommand { get; }
+        public ICommand PickForeColorCommand { get; }
+        public ICommand PickBackColorCommand { get; }
+        public ICommand ConfigureCommand { get; }
+        public ICommand BrowseFileCommand { get; }
+
+        public DrawableItemViewModel(Action onChanged = null, Action<DrawableItemViewModel> onRemove = null)
+        {
+            _onChanged = onChanged;
+            RemoveCommand = new RelayCommand(() => onRemove?.Invoke(this));
+            PickFillColorCommand = new RelayCommand(() =>
+            {
+                var picked = StepNodeViewModel.PromptColorHelper(FillColor);
+                if (picked != null) FillColor = picked;
+            });
+            PickLineColorCommand = new RelayCommand(() =>
+            {
+                var picked = StepNodeViewModel.PromptColorHelper(LineColor);
+                if (picked != null) LineColor = picked;
+            });
+            PickForeColorCommand = new RelayCommand(() =>
+            {
+                var picked = StepNodeViewModel.PromptColorHelper(ForeColor);
+                if (picked != null) ForeColor = picked;
+            });
+            PickBackColorCommand = new RelayCommand(() =>
+            {
+                var picked = StepNodeViewModel.PromptColorHelper(BackColor);
+                if (picked != null) BackColor = picked;
+            });
+            ConfigureCommand = new RelayCommand(ConfigureDrawableItem);
+            BrowseFileCommand = new RelayCommand(BrowseFile);
+        }
+
+        private void ConfigureDrawableItem()
+        {
+            var dict = ToDictionary();
+            var window = System.Windows.Application.Current?.Windows.OfType<System.Windows.Window>().FirstOrDefault(w => w.IsActive);
+            if (RecipeDrawableRegistry.Instance.ConfigureDrawable(Type, dict, window))
+            {
+                foreach (var kv in dict)
+                {
+                    _parameters[kv.Key] = kv.Value;
+                }
+                if (dict.TryGetValue("Text", out var t) && t != null)
+                {
+                    _text = t.ToString();
+                    OnPropertyChanged(nameof(Text));
+                }
+                if (dict.TryGetValue("ForeColor", out var fc) && fc != null)
+                {
+                    _foreColor = fc.ToString();
+                    OnPropertyChanged(nameof(ForeColor));
+                }
+                if (dict.TryGetValue("BackColor", out var bc) && bc != null)
+                {
+                    _backColor = bc.ToString();
+                    OnPropertyChanged(nameof(BackColor));
+                }
+                if (dict.TryGetValue("RoundedDots", out var rd) && rd != null && bool.TryParse(rd.ToString(), out bool bRd))
+                {
+                    _roundedDots = bRd;
+                    OnPropertyChanged(nameof(RoundedDots));
+                }
+                if (dict.TryGetValue("QuietZone", out var mg) && mg != null && int.TryParse(mg.ToString(), out int iMg))
+                {
+                    _quietZone = iMg;
+                    OnPropertyChanged(nameof(QuietZone));
+                }
+                OnPropertyChanged(nameof(ConfigurationSummary));
+                _onChanged?.Invoke();
+            }
+        }
+
+        private void BrowseFile()
+        {
+            string chosenFile = IsCursorType
+                ? FileDialogs.PickFileToOpen(IntPtr.Zero, Texts.Get<IRecipeEditorLanguage>().FilterCursorImage + "|*.cur;*.ico;*.png" + "|" + Texts.Get<IRecipeEditorLanguage>().FilterAllFiles + "|*.*", Texts.Get<IRecipeEditorLanguage>().TitleSelectCursor)
+                : FileDialogs.PickFileToOpen(IntPtr.Zero, Texts.Get<IRecipeEditorLanguage>().FilterImage + "|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.ico;*.svg" + "|" + Texts.Get<IRecipeEditorLanguage>().FilterAllFiles + "|*.*", Texts.Get<IRecipeEditorLanguage>().TitleSelectImage);
+            if (chosenFile != null)
+            {
+                FilePath = chosenFile;
+                try
+                {
+                    if (IsImageType && System.IO.File.Exists(chosenFile) && string.Equals(Path.GetExtension(chosenFile), ".svg", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // An SVG stays a vector: the file is embedded as it is
+                        LockAspectRatio = true;
+                        if (IsEmbedMode)
+                        {
+                            ImageData = Convert.ToBase64String(File.ReadAllBytes(chosenFile));
+                        }
+                    }
+                    else if (IsImageType && System.IO.File.Exists(chosenFile))
+                    {
+                        // Through a stream: GDI+ can't open a path longer than 260 characters
+                        using var imageStream = File.OpenRead(chosenFile);
+                        using var img = System.Drawing.Image.FromStream(imageStream);
+                        if (img.Width > 0 && img.Height > 0)
+                        {
+                            _aspectRatio = (double)img.Width / img.Height;
+                        }
+                        Width = img.Width.ToString();
+                        Height = img.Height.ToString();
+                        LockAspectRatio = true;
+
+                        // Default embed mode automatically loads ImageData
+                        if (IsEmbedMode)
+                        {
+                            using var ms = new MemoryStream();
+                            img.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                            ImageData = Convert.ToBase64String(ms.ToArray());
+                        }
+                    }
+                    else if (IsCursorType && System.IO.File.Exists(chosenFile))
+                    {
+                        if (IsCursorEmbedMode || IsEmbedMode)
+                        {
+                            byte[] bytes = File.ReadAllBytes(chosenFile);
+                            ImageData = Convert.ToBase64String(bytes);
+                        }
+                    }
+                }
+                catch
+                {
+                    // Ignore dimension read failures
+                }
+            }
+        }
+
+        public Dictionary<string, object> ToDictionary()
+        {
+            var dict = new Dictionary<string, object>(_parameters, StringComparer.OrdinalIgnoreCase)
+            {
+                ["Type"] = Type,
+                ["Width"] = Width,
+                ["Height"] = Height,
+                ["OffsetX"] = OffsetX,
+                ["OffsetY"] = OffsetY
+            };
+            if (!string.IsNullOrEmpty(HorizontalAnchor) && HorizontalAnchor != "None") dict["HorizontalAnchor"] = HorizontalAnchor;
+            if (!string.IsNullOrEmpty(VerticalAnchor) && VerticalAnchor != "None") dict["VerticalAnchor"] = VerticalAnchor;
+
+            if (HasLineThickness) dict["LineThickness"] = LineThickness;
+            if (HasShadow) dict["Shadow"] = Shadow;
+            if (HasFillColor) dict["FillColor"] = FillColor;
+            if (HasLineColor) dict["LineColor"] = LineColor;
+
+            if (HasFontSettings)
+            {
+                dict["FontFamily"] = FontFamily;
+                dict["FontSize"] = FontSize;
+                dict["Bold"] = FontBold;
+                dict["Italic"] = FontItalic;
+                dict["TextAlign"] = TextAlignment;
+            }
+
+            if (IsTextType) dict["Text"] = Text;
+            if (IsEmojiType) dict["Emoji"] = Emoji;
+            if (IsArrowType) dict["ArrowHeads"] = ArrowHeads;
+            if (IsStepLabelType)
+            {
+                dict["Number"] = StepNumber;
+                dict["Text"] = StepNumber.ToString();
+            }
+            if (IsBlurType) dict["BlurRadius"] = BlurRadius;
+            if (IsPixelizeType) dict["PixelSize"] = PixelSize;
+            if (IsMagnifyType) dict["MagnificationFactor"] = MagnificationFactor;
+            if (IsQrCodeType)
+            {
+                dict["ForeColor"] = ForeColor;
+                dict["BackColor"] = BackColor;
+                dict["RoundedDots"] = RoundedDots;
+                dict["QuietZone"] = QuietZone;
+                if (!string.IsNullOrEmpty(Text)) dict["Text"] = Text;
+            }
+            if (IsImageType)
+            {
+                if (IsEmbedMode && !string.IsNullOrEmpty(ImageData))
+                {
+                    dict["ImageData"] = ImageData;
+                    dict.Remove("FilePath");
+                }
+                else if (!string.IsNullOrEmpty(FilePath))
+                {
+                    dict["FilePath"] = FilePath;
+                    dict.Remove("ImageData");
+                }
+            }
+            if (IsCursorType)
+            {
+                if (HasEmbeddedData && !string.IsNullOrEmpty(ImageData))
+                {
+                    dict["ImageData"] = ImageData;
+                    dict.Remove("FilePath");
+                    dict.Remove("CursorName");
+                }
+                else if (HasLinkedFile && !string.IsNullOrEmpty(FilePath))
+                {
+                    dict["FilePath"] = FilePath;
+                    dict.Remove("ImageData");
+                    dict.Remove("CursorName");
+                }
+                else
+                {
+                    dict["CursorName"] = CursorName ?? "Arrow";
+                    dict.Remove("ImageData");
+                    dict.Remove("FilePath");
+                }
+            }
+            if (IsSpeechbubbleType)
+            {
+                dict["TailDirection"] = TailDirection;
+                if (!string.IsNullOrEmpty(TailOffsetX) && TailOffsetX != "0") dict["TailOffsetX"] = TailOffsetX;
+                if (!string.IsNullOrEmpty(TailOffsetY) && TailOffsetY != "0") dict["TailOffsetY"] = TailOffsetY;
+            }
+            if (_lockAspectRatio.HasValue)
+            {
+                dict["LockAspectRatio"] = _lockAspectRatio.Value;
+            }
+
+            return OnlyDeclared(dict);
+        }
+
+        /// <summary>
+        /// Only the properties of the annotation type, written as declared and in their type ("5" is 5 for a whole number):
+        /// the item keeps everything it was loaded with (e.g. all styles of an imported element), the recipe gets what the type reads.
+        /// A type registered without its properties keeps everything.
+        /// </summary>
+        private Dictionary<string, object> OnlyDeclared(Dictionary<string, object> dict)
+        {
+            var properties = RecipeDrawableRegistry.Instance.GetProperties(Type);
+            if (properties == null) return dict;
+            var declared = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kvp in dict)
+            {
+                var property = properties.FirstOrDefault(p => p.Matches(kvp.Key));
+                if (property == null) continue;
+                declared[property.Name] = kvp.Value is string text ? RecipeParameterTypes.FromText(text, property.DataType) : kvp.Value;
+            }
+            return declared;
+        }
+
+        public static DrawableItemViewModel FromDictionary(IDictionary dict, Action onChanged = null, Action<DrawableItemViewModel> onRemove = null)
+        {
+            var item = new DrawableItemViewModel(onChanged, onRemove);
+            if (dict == null) return item;
+
+            foreach (DictionaryEntry de in dict)
+            {
+                if (de.Key != null) item._parameters[de.Key.ToString()] = de.Value;
+            }
+
+            string GetKey(string key)
+            {
+                return item._parameters.TryGetValue(key, out var val) && val != null ? val.ToString() : null;
+            }
+
+            bool? GetBool(string key)
+            {
+                if (item._parameters.TryGetValue(key, out var val) && val != null)
+                {
+                    if (val is bool b) return b;
+                    if (bool.TryParse(val.ToString(), out bool pb)) return pb;
+                }
+                return null;
+            }
+
+            int? GetInt(string key)
+            {
+                if (item._parameters.TryGetValue(key, out var val) && val != null)
+                {
+                    if (val is int i) return i;
+                    if (val is long l) return (int)l;
+                    if (int.TryParse(val.ToString(), out int pi)) return pi;
+                }
+                return null;
+            }
+
+            double? GetDouble(string key)
+            {
+                if (item._parameters.TryGetValue(key, out var val) && val != null)
+                {
+                    if (val is double d) return d;
+                    if (val is float f) return f;
+                    if (val is int i) return i;
+                    if (double.TryParse(val.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double pd)) return pd;
+                }
+                return null;
+            }
+
+            string typeVal = GetKey("Type");
+            item._type = string.IsNullOrEmpty(typeVal) ? "Rectangle" : typeVal;
+
+            string txt = GetKey("Text");
+            if (txt != null) item._text = txt;
+
+            string emo = GetKey("Emoji");
+            if (emo != null) item._emoji = emo;
+
+            string ha = GetKey("HorizontalAnchor");
+            if (ha != null) item._horizontalAnchor = ha;
+
+            string va = GetKey("VerticalAnchor");
+            if (va != null) item._verticalAnchor = va;
+
+            string w = GetKey("Width");
+            if (w != null) item._width = w;
+
+            string h = GetKey("Height");
+            if (h != null) item._height = h;
+
+            string ox = GetKey("OffsetX");
+            if (ox != null) item._offsetX = ox;
+
+            string oy = GetKey("OffsetY");
+            if (oy != null) item._offsetY = oy;
+
+            string fc = GetKey("FillColor");
+            if (fc != null) item._fillColor = fc;
+
+            string lc = GetKey("LineColor");
+            if (lc != null) item._lineColor = lc;
+
+            int? lt = GetInt("LineThickness");
+            if (lt.HasValue) item._lineThickness = lt.Value;
+
+            bool? sh = GetBool("Shadow");
+            if (sh.HasValue) item._shadow = sh.Value;
+            else item._shadow = item._type switch
+            {
+                "Rectangle" or "Ellipse" or "Line" or "Arrow" or "Text" => true,
+                _ => false
+            };
+
+            string ff = GetKey("FontFamily");
+            if (ff != null) item._fontFamily = ff;
+
+            double? fs = GetDouble("FontSize");
+            if (fs.HasValue) item._fontSize = fs.Value;
+            else if (item.IsSpeechbubbleType) item._fontSize = 14.0;
+            else item._fontSize = 12.0;
+
+            bool? fb = GetBool("Bold");
+            if (fb.HasValue) item._fontBold = fb.Value;
+            else if (item.IsSpeechbubbleType) item._fontBold = true;
+
+            bool? fi = GetBool("Italic");
+            if (fi.HasValue) item._fontItalic = fi.Value;
+
+            string ta = GetKey("TextAlign");
+            if (ta != null) item._textAlignment = ta;
+
+            string ah = GetKey("ArrowHeads");
+            if (ah != null) item._arrowHeads = ah;
+
+            int? sn = GetInt("Number");
+            if (sn.HasValue) item._stepNumber = sn.Value;
+            else if (int.TryParse(item._text, out int parsedNum)) item._stepNumber = parsedNum;
+
+            int? br = GetInt("BlurRadius");
+            if (br.HasValue) item._blurRadius = br.Value;
+
+            int? ps = GetInt("PixelSize");
+            if (ps.HasValue) item._pixelSize = ps.Value;
+
+            int? mf = GetInt("MagnificationFactor");
+            if (mf.HasValue) item._magnificationFactor = mf.Value;
+
+            string foreC = GetKey("ForeColor");
+            if (foreC != null) item._foreColor = foreC;
+
+            string backC = GetKey("BackColor");
+            if (backC != null) item._backColor = backC;
+
+            bool? rd = GetBool("RoundedDots");
+            if (rd.HasValue) item._roundedDots = rd.Value;
+
+            int? mg = GetInt("QuietZone");
+            if (mg.HasValue) item._quietZone = mg.Value;
+
+            string td = GetKey("TailDirection");
+            if (td != null) item._tailDirection = td;
+
+            string tox = GetKey("TailOffsetX");
+            if (tox != null) item._tailOffsetX = tox;
+
+            string toy = GetKey("TailOffsetY");
+            if (toy != null) item._tailOffsetY = toy;
+
+            string fp = GetKey("FilePath");
+            if (fp != null) item._filePath = fp;
+
+            string imgData = GetKey("ImageData");
+            if (imgData != null)
+            {
+                item._imageData = imgData;
+                item._assetStorageMode = "Embed";
+            }
+            else if (!string.IsNullOrEmpty(fp))
+            {
+                item._assetStorageMode = "Link";
+            }
+
+            string curName = GetKey("CursorName");
+            if (curName != null)
+            {
+                item._cursorName = curName;
+            }
+            else if (item.IsCursorType && !string.IsNullOrEmpty(imgData))
+            {
+                item._cursorName = null;
+                item._assetStorageMode = "Embed";
+            }
+            else if (item.IsCursorType && !string.IsNullOrEmpty(fp))
+            {
+                item._cursorName = null;
+                item._assetStorageMode = "Link";
+            }
+            else if (item.IsCursorType)
+            {
+                item._cursorName = "Arrow";
+                item._assetStorageMode = "Preset";
+            }
+
+            string lockAsp = GetKey("LockAspectRatio");
+            if (lockAsp != null && bool.TryParse(lockAsp, out bool bLock)) item._lockAspectRatio = bLock;
+
+            if (double.TryParse(item._width, out double dw) && double.TryParse(item._height, out double dh) && dw > 0 && dh > 0)
+            {
+                item._aspectRatio = dw / dh;
+            }
+
+            return item;
+        }
+    }
+
+    public class StepNodeViewModel : ViewModelBase
+    {
+        private Point _location;
+        private Size _size;
+        private bool _isSelected;
+        private bool _isStartNode;
+        private bool _isInCycle;
+        private string _name;
+
+        public RecipeNodeConfig Config { get; }
+
+        public Action<StepNodeViewModel, string, string> OnIdChanged { get; set; }
+        public Func<string> RecipeNameProvider { get; set; }
+
+        public string Id
+        {
+            get => Config.Id;
+            set
+            {
+                if (string.IsNullOrWhiteSpace(value) || value == Config.Id) return;
+                string oldId = Config.Id;
+                Config.Id = value.Trim();
+                OnPropertyChanged(nameof(Id));
+                OnPropertyChanged(nameof(DisplayName));
+                OnIdChanged?.Invoke(this, oldId, Config.Id);
+            }
+        }
+
+        public void ResetId(string id)
+        {
+            Config.Id = id;
+            OnPropertyChanged(nameof(Id));
+            OnPropertyChanged(nameof(DisplayName));
+        }
+
+        public string StepType => Config.StepType;
+
+        public string Name
+        {
+            get => _name;
+            set
+            {
+                if (SetField(ref _name, value))
+                {
+                    Config.Name = value;
+                    OnPropertyChanged(nameof(DisplayName));
+                }
+            }
+        }
+
+        public string DisplayName => string.IsNullOrWhiteSpace(Name) ? StepType : Name;
+
+        /// <summary>
+        /// Off: the recipe skips the step and goes on with the next ones
+        /// </summary>
+        public bool StepEnabled
+        {
+            get => Config.Enabled;
+            set
+            {
+                if (Config.Enabled == value) return;
+                Config.Enabled = value;
+                OnPropertyChanged();
+            }
+        }
+
+        /// <summary>
+        /// The expression deciding at run time whether the step runs, empty for always
+        /// </summary>
+        public string StepWhen
+        {
+            get => Config.When;
+            set
+            {
+                string when = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+                if (when == Config.When) return;
+                Config.When = when;
+                OnPropertyChanged();
+            }
+        }
+
+        /// <summary>
+        /// The title of the step, which screen readers announce for the step in lists (instead of the class name)
+        /// </summary>
+        public override string ToString() => DisplayName;
+
+        public Point Location
+        {
+            get => _location;
+            set => SetField(ref _location, value);
+        }
+
+        public Size Size
+        {
+            get => _size;
+            set => SetField(ref _size, value);
+        }
+
+        public bool IsSelected
+        {
+            get => _isSelected;
+            set => SetField(ref _isSelected, value);
+        }
+
+        public bool IsStartNode
+        {
+            get => _isStartNode;
+            set
+            {
+                if (SetField(ref _isStartNode, value))
+                {
+                    OnToggleStartNode?.Invoke(this);
+                }
+            }
+        }
+
+        public bool IsInCycle
+        {
+            get => _isInCycle;
+            set => SetField(ref _isInCycle, value);
+        }
+
+        public bool IsConditional => string.Equals(StepType, WellKnownStepTypes.Conditional, StringComparison.OrdinalIgnoreCase);
+        public bool IsUserPrompt => string.Equals(StepType, WellKnownStepTypes.UserPrompt, StringComparison.OrdinalIgnoreCase);
+        public bool IsDynamicDestination => string.Equals(StepType, WellKnownStepTypes.DynamicDestination, StringComparison.OrdinalIgnoreCase);
+        public bool HasDynamicOutputPorts => IsConditional || IsUserPrompt;
+
+        public bool IsExternalCommand => IsStepType("ExternalCommand");
+
+        public bool IsJira => IsStepType("Jira");
+
+        public bool IsConfluence => IsStepType("Confluence");
+
+        public bool IsOffice => IsStepType("Office");
+
+        public bool IsZxing => IsStepType("BarcodeScan");
+
+        public bool IsBox => IsStepType("Box");
+
+        public bool IsDropbox => IsStepType("Dropbox");
+
+        private bool IsStepType(string stepType) => string.Equals(StepType, stepType, StringComparison.OrdinalIgnoreCase);
+
+        public bool IsCloudStorage => IsBox || IsDropbox;
+
+        public bool IsSlot => IsStepType(WellKnownStepTypes.Slot);
+
+        /// <summary>
+        /// Automatic step: where it starts (its connections are the start steps); not a step of the flow
+        /// </summary>
+        public bool IsInNode => IsStepType(RecipeEditorViewModel.InNodeId);
+
+        /// <summary>
+        /// Automatic step: where it ends and the recipe goes on (connections to it lead to "Out"); not a step of the flow
+        /// </summary>
+        public bool IsOutNode => IsStepType(RecipeExtension.OutNode);
+
+        public bool IsBoundary => IsInNode || IsOutNode;
+
+        /// <summary>
+        /// Slot: the names of the extensions which plug in (set by the editor, which knows the recipe and the extensions)
+        /// </summary>
+        public Func<StepNodeViewModel, IReadOnlyList<string>> SlotExtensionsProvider { get; set; }
+
+        /// <summary>
+        /// Slot: the extensions which plug in, shown greyed out on the node
+        /// </summary>
+        public IReadOnlyList<string> SlotExtensions => IsSlot ? SlotExtensionsProvider?.Invoke(this) ?? Array.Empty<string>() : Array.Empty<string>();
+
+        public bool HasNoSlotExtensions => IsSlot && SlotExtensions.Count == 0;
+
+        public IReadOnlyList<string> SlotNames => RecipeSlots.All;
+
+        /// <summary>
+        /// Slot: what the slot is for, shown under the choice
+        /// </summary>
+        public string SlotDescription
+        {
+            get
+            {
+                switch (RecipeSlots.Normalize(SlotName))
+                {
+                    case RecipeSlots.AfterCapture: return Texts.Get<IRecipeEditorLanguage>().SlotAfterCapture;
+                    case RecipeSlots.BeforeExport: return Texts.Get<IRecipeEditorLanguage>().SlotBeforeExport;
+                    case RecipeSlots.AfterExport: return Texts.Get<IRecipeEditorLanguage>().SlotAfterExport;
+                    case RecipeSlots.BeforeDestination: return Texts.Get<IRecipeEditorLanguage>().SlotBeforeDestination;
+                    default: return null;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Slot: AfterCapture, BeforeExport, AfterExport or BeforeDestination
+        /// </summary>
+        public string SlotName
+        {
+            get => RecipeSlots.Normalize(GetParam("Name", RecipeSlots.BeforeExport)) ?? GetParam("Name", RecipeSlots.BeforeExport);
+            set
+            {
+                SetParam("Name", value);
+                OnPropertyChanged(nameof(SlotName));
+                OnSlotChanged();
+            }
+        }
+
+        /// <summary>
+        /// Slot: which extensions it takes, "all", "none" or extension ids separated by commas.
+        /// In the recipe "Accept" is the list of ids: left out for all, empty for none.
+        /// </summary>
+        public string SlotAccept
+        {
+            get
+            {
+                var accept = Config?.GetParameter<List<string>>("Accept");
+                if (accept == null) return SlotAcceptAll;
+                return accept.Count == 0 ? SlotAcceptNone : string.Join(", ", accept);
+            }
+            set
+            {
+                string text = value?.Trim();
+                if (string.IsNullOrEmpty(text) || string.Equals(text, SlotAcceptAll, StringComparison.OrdinalIgnoreCase))
+                {
+                    Config.Parameters?.Remove("Accept");
+                    NotifyConfigUpdated();
+                }
+                else if (string.Equals(text, SlotAcceptNone, StringComparison.OrdinalIgnoreCase))
+                {
+                    SetParam("Accept", new List<string>());
+                }
+                else
+                {
+                    SetParam("Accept", RecipeSlots.SplitList(text).ToList());
+                }
+                OnPropertyChanged(nameof(SlotAccept));
+                OnSlotChanged();
+            }
+        }
+
+        private const string SlotAcceptAll = "all";
+        private const string SlotAcceptNone = "none";
+
+        private void OnSlotChanged()
+        {
+            OnPropertyChanged(nameof(Summary));
+            OnPropertyChanged(nameof(SlotDescription));
+            OnPropertyChanged(nameof(SlotExtensions));
+            OnPropertyChanged(nameof(HasNoSlotExtensions));
+        }
+        public StepPortViewModel InputPort { get; }
+        public StepPortViewModel OutputPort { get; }
+
+        public ObservableCollection<StepPortViewModel> Input { get; } = new ObservableCollection<StepPortViewModel>();
+        public ObservableCollection<StepPortViewModel> Output { get; } = new ObservableCollection<StepPortViewModel>();
+
+        public ObservableCollection<ConditionBranchViewModel> ConditionBranches { get; } = new ObservableCollection<ConditionBranchViewModel>();
+        public ObservableCollection<PromptChoiceViewModel> PromptChoices { get; } = new ObservableCollection<PromptChoiceViewModel>();
+        public ObservableCollection<VariableItemViewModel> Variables { get; } = new ObservableCollection<VariableItemViewModel>();
+        public ObservableCollection<DrawableItemViewModel> Annotations { get; } = new ObservableCollection<DrawableItemViewModel>();
+
+        public ICommand AddConditionBranchCommand { get; }
+        public ICommand AddPromptChoiceCommand { get; }
+        public ICommand AddVariableCommand { get; }
+        public ICommand AddAnnotationCommand { get; }
+        public ICommand ImportFromEditorCommand { get; }
+        public ICommand ImportFromGreenshotFileCommand { get; }
+        public ICommand BrowseSaveDirectoryCommand { get; }
+        public ICommand BrowseExternalExecutableCommand { get; }
+        public ICommand BrowseSoundFileCommand { get; }
+        public ICommand PlaySoundPreviewCommand { get; }
+        public ICommand PickBorderColorCommand { get; }
+        public ICommand PickTextEffectColorCommand { get; }
+        public ICommand PickCanvasBackgroundColorCommand { get; }
+        public ICommand PickTransparencyBackgroundColorCommand { get; }
+
+        public Action<StepNodeViewModel> OnSetStartNode { get; set; }
+        public Action<StepNodeViewModel> OnToggleStartNode { get; set; }
+        public ICommand SetAsStartNodeCommand { get; }
+        public ICommand ToggleStartNodeCommand { get; }
+        public Action<StepNodeViewModel> OnDeleteNode { get; set; }
+        public ICommand DeleteNodeCommand { get; }
+
+        public StepNodeViewModel(RecipeNodeConfig config, Point initialLocation, Action<StepNodeViewModel> onSetStartNode = null, Action<StepNodeViewModel> onDeleteNode = null, Action<StepNodeViewModel, string, string> onIdChanged = null, Action<StepNodeViewModel> onToggleStartNode = null)
+        {
+            Config = config ?? throw new ArgumentNullException(nameof(config));
+            _name = config.Name;
+            _location = initialLocation;
+            OnSetStartNode = onSetStartNode;
+            OnToggleStartNode = onToggleStartNode;
+            OnDeleteNode = onDeleteNode;
+            OnIdChanged = onIdChanged;
+            SetAsStartNodeCommand = new RelayCommand(() => OnSetStartNode?.Invoke(this));
+            ToggleStartNodeCommand = new RelayCommand(() =>
+            {
+                IsStartNode = !IsStartNode;
+            });
+            DeleteNodeCommand = new RelayCommand(() => OnDeleteNode?.Invoke(this));
+
+            InputPort = new StepPortViewModel(this, isInput: true);
+            OutputPort = new StepPortViewModel(this, isInput: false);
+            Input.Add(InputPort);
+            Output.Add(OutputPort);
+
+            AddConditionBranchCommand = new RelayCommand(() => AddConditionBranch(null, "${true}"));
+
+            AddPromptChoiceCommand = new RelayCommand(() =>
+            {
+                string nextKey = FreeKey(PromptChoices.Select(p => p.Key), number => $"Choice{number}");
+                string nextLabel = string.Format(Texts.Get<IRecipeEditorLanguage>().PromptChoiceDefaultLabel, PromptChoices.Count + 1);
+                AddPromptChoice(nextKey, nextLabel, "Primary", false, false);
+            });
+
+            if (IsConditional)
+            {
+                LoadConditionBranches();
+            }
+            else if (IsUserPrompt)
+            {
+                LoadPromptChoices();
+            }
+
+            AddVariableCommand = new RelayCommand(() => AddVariable("new_var", "${user.name}"));
+            AddAnnotationCommand = new RelayCommand(p => AddAnnotation((p as string) ?? "Rectangle"));
+            ImportFromEditorCommand = new RelayCommand(ExecuteImportFromEditor);
+            ImportFromGreenshotFileCommand = new RelayCommand(ExecuteImportFromGreenshotFile);
+            BrowseSaveDirectoryCommand = new RelayCommand(() =>
+            {
+                // The folder as it is now, as a start for the dialog; null when it uses values only a capture has
+                string initialDirectory = string.IsNullOrEmpty(SaveDirectory) ? null : Greenshot.Base.Expressions.OutputTemplates.RenderFolder(SaveDirectory, Greenshot.Base.Expressions.VariableScope.Empty, out _);
+                string folder = FileDialogs.PickFolder(null, Texts.Get<IRecipeEditorLanguage>().TitleSelectCaptureFolder, initialDirectory);
+                if (folder != null)
+                {
+                    SaveDirectory = folder;
+                }
+            });
+
+            BrowseExternalExecutableCommand = new RelayCommand(() =>
+            {
+                string executable = FileDialogs.PickFileToOpen(IntPtr.Zero, Texts.Get<IRecipeEditorLanguage>().FilterExecutable + "|*.exe;*.cmd;*.bat;*.ps1;*.vbs" + "|" + Texts.Get<IRecipeEditorLanguage>().FilterAllFiles + "|*.*", Texts.Get<IRecipeEditorLanguage>().TitleSelectExecutable);
+                if (executable != null)
+                {
+                    ExternalCommandLine = executable;
+                }
+            });
+
+            BrowseSoundFileCommand = new RelayCommand(() =>
+            {
+                string soundFile = FileDialogs.PickFileToOpen(IntPtr.Zero, Texts.Get<IRecipeEditorLanguage>().FilterWave + "|*.wav" + "|" + Texts.Get<IRecipeEditorLanguage>().FilterAudio + "|*.wav;*.mp3" + "|" + Texts.Get<IRecipeEditorLanguage>().FilterAllFiles + "|*.*", Texts.Get<IRecipeEditorLanguage>().TitleSelectSound);
+                if (soundFile != null)
+                {
+                    SoundFilePath = soundFile;
+                }
+            });
+
+            PlaySoundPreviewCommand = new RelayCommand(() =>
+            {
+                if (!string.IsNullOrEmpty(SoundFilePath))
+                {
+                    try
+                    {
+                        string expanded = Greenshot.Base.Expressions.OutputTemplates.RenderFolder(SoundFilePath, Greenshot.Base.Expressions.VariableScope.Empty, out _);
+                        if (!string.IsNullOrEmpty(expanded) && File.Exists(expanded))
+                        {
+                            using (var player = new System.Media.SoundPlayer(expanded))
+                            {
+                                player.Play();
+                            }
+                            return;
+                        }
+                    }
+                    catch { }
+                }
+                System.Media.SystemSounds.Beep.Play();
+            });
+
+            PickBorderColorCommand = new RelayCommand(() =>
+            {
+                var picked = PromptColorHelper(EffectBorderColor);
+                if (picked != null) EffectBorderColor = picked;
+            });
+            PickTextEffectColorCommand = new RelayCommand(() =>
+            {
+                var picked = PromptColorHelper(TextEffectFillColor);
+                if (picked != null) TextEffectFillColor = picked;
+            });
+            PickCanvasBackgroundColorCommand = new RelayCommand(() =>
+            {
+                var picked = PromptColorHelper(CanvasBackgroundColor);
+                if (picked != null) CanvasBackgroundColor = picked;
+            });
+            PickTransparencyBackgroundColorCommand = new RelayCommand(() =>
+            {
+                var picked = PromptColorHelper(TransparencyBackgroundColor);
+                if (picked != null) TransparencyBackgroundColor = picked;
+            });
+
+            LoadVariablesFromConfig();
+            LoadAnnotationsFromConfig();
+        }
+
+        public static string PromptColorHelper(string currentColor)
+        {
+            var initialColor = ParseColorHelper(currentColor);
+            var colorPicker = new ColorPickerWindow
+            {
+                SelectedColor = initialColor
+            };
+            if (colorPicker.ShowDialog() == true)
+            {
+                var color = colorPicker.SelectedColor;
+                if (color.A == 0) return "transparent";
+                if (color.A == 255) return $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+                return $"#{color.A:X2}{color.R:X2}{color.G:X2}{color.B:X2}";
+            }
+            return null;
+        }
+
+        public static System.Drawing.Color ParseColorHelper(string colorStr)
+        {
+            if (string.IsNullOrWhiteSpace(colorStr) || string.Equals(colorStr, "transparent", StringComparison.OrdinalIgnoreCase))
+            {
+                return System.Drawing.Color.Transparent;
+            }
+            try
+            {
+                if (colorStr.StartsWith("#", StringComparison.Ordinal))
+                {
+                    return System.Drawing.ColorTranslator.FromHtml(colorStr);
+                }
+                var named = System.Drawing.Color.FromName(colorStr);
+                if (named.IsKnownColor) return named;
+                return System.Drawing.ColorTranslator.FromHtml(colorStr);
+            }
+            catch
+            {
+                return System.Drawing.Color.Black;
+            }
+        }
+
+        public void LoadVariablesFromConfig()
+        {
+            Variables.Clear();
+            if (Config.Parameters != null)
+            {
+                object varsObj = null;
+                foreach (var kvp in Config.Parameters)
+                {
+                    if (string.Equals(kvp.Key, "Variables", StringComparison.OrdinalIgnoreCase))
+                    {
+                        varsObj = kvp.Value;
+                        break;
+                    }
+                }
+
+                if (varsObj != null)
+                {
+                    if (varsObj is IDictionary dict)
+                    {
+                        foreach (var key in dict.Keys)
+                        {
+                            Variables.Add(new VariableItemViewModel(key?.ToString() ?? "", dict[key]?.ToString() ?? "", SyncVariablesToConfig, RemoveVariable));
+                        }
+                    }
+                }
+            }
+        }
+
+        public void SyncVariablesToConfig()
+        {
+            if (Config.Parameters == null)
+            {
+                Config.Parameters = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            }
+            var dict = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            foreach (var v in Variables)
+            {
+                if (!string.IsNullOrWhiteSpace(v.Key))
+                {
+                    dict[v.Key] = v.Value ?? "";
+                }
+            }
+            Config.Parameters["Variables"] = dict;
+            NotifyConfigUpdated();
+        }
+
+        public void AddVariable(string key = "var_name", string value = "${user.name}")
+        {
+            var item = new VariableItemViewModel(key, value, SyncVariablesToConfig, RemoveVariable);
+            Variables.Add(item);
+            SyncVariablesToConfig();
+        }
+
+        public void RemoveVariable(VariableItemViewModel item)
+        {
+            if (item != null && Variables.Contains(item))
+            {
+                Variables.Remove(item);
+                SyncVariablesToConfig();
+            }
+        }
+
+        public void LoadAnnotationsFromConfig()
+        {
+            Annotations.Clear();
+            if (Config.Parameters != null)
+            {
+                object aObj = null;
+                foreach (var kvp in Config.Parameters)
+                {
+                    if (string.Equals(kvp.Key, "Annotations", StringComparison.OrdinalIgnoreCase))
+                    {
+                        aObj = kvp.Value;
+                        break;
+                    }
+                }
+
+                if (aObj is IEnumerable enumerable && !(aObj is string))
+                {
+                    foreach (var elem in enumerable)
+                    {
+                        if (elem is IDictionary d)
+                        {
+                            Annotations.Add(DrawableItemViewModel.FromDictionary(d, SyncAnnotationsToConfig, RemoveAnnotation));
+                        }
+                    }
+                }
+            }
+        }
+
+        public void SyncAnnotationsToConfig()
+        {
+            if (Config.Parameters == null)
+            {
+                Config.Parameters = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            }
+            Config.Parameters["Annotations"] = Annotations.Select(d => d.ToDictionary()).ToList();
+            NotifyConfigUpdated();
+        }
+
+        public void AddAnnotation(string type = "Rectangle")
+        {
+            var item = new DrawableItemViewModel(SyncAnnotationsToConfig, RemoveAnnotation)
+            {
+                Type = type
+            };
+            if (string.Equals(type, "Text", StringComparison.OrdinalIgnoreCase))
+            {
+                item.Text = "Captured: ${time.now:yyyy-MM-dd}";
+                item.Width = "220";
+                item.Height = "32";
+                item.FillColor = "transparent";
+                item.LineColor = "#FF0000";
+                item.FontSize = 12.0;
+                item.FontBold = false;
+                item.FontItalic = false;
+                item.Shadow = true;
+                item.LineThickness = 0;
+            }
+            else if (string.Equals(type, "Speechbubble", StringComparison.OrdinalIgnoreCase))
+            {
+                item.Text = "Note";
+                item.Width = "160";
+                item.Height = "60";
+                item.FontSize = 14.0;
+                item.FontBold = true;
+                item.LineColor = "#0000FF";
+                item.FillColor = "#FFFFFF";
+                item.LineThickness = 2;
+                item.Shadow = false;
+            }
+            else if (string.Equals(type, "StepLabel", StringComparison.OrdinalIgnoreCase))
+            {
+                item.StepNumber = 1;
+                item.Text = "1";
+                item.Width = "28";
+                item.Height = "28";
+                item.FillColor = "#E81123";
+                item.LineColor = "#FFFFFF";
+                item.Shadow = false;
+            }
+            else if (string.Equals(type, "Emoji", StringComparison.OrdinalIgnoreCase))
+            {
+                item.Emoji = "🛡️";
+                item.Width = "32";
+                item.Height = "32";
+            }
+            else if (string.Equals(type, "Arrow", StringComparison.OrdinalIgnoreCase))
+            {
+                item.ArrowHeads = "END_POINT";
+                item.LineThickness = 2;
+                item.LineColor = "#FF0000";
+                item.Shadow = true;
+                item.Width = "100";
+                item.Height = "50";
+            }
+            else if (string.Equals(type, "Line", StringComparison.OrdinalIgnoreCase))
+            {
+                item.LineThickness = 2;
+                item.LineColor = "#FF0000";
+                item.Shadow = true;
+                item.Width = "100";
+                item.Height = "50";
+            }
+            else if (string.Equals(type, "Blur", StringComparison.OrdinalIgnoreCase))
+            {
+                item.BlurRadius = 10;
+                item.Width = "150";
+                item.Height = "80";
+            }
+            else if (string.Equals(type, "Pixelize", StringComparison.OrdinalIgnoreCase))
+            {
+                item.PixelSize = 5;
+                item.Width = "150";
+                item.Height = "80";
+            }
+            else if (string.Equals(type, "Magnify", StringComparison.OrdinalIgnoreCase))
+            {
+                item.MagnificationFactor = 2;
+                item.Width = "120";
+                item.Height = "120";
+            }
+            else if (string.Equals(type, "Highlight", StringComparison.OrdinalIgnoreCase))
+            {
+                item.FillColor = "#FFFF00";
+                item.LineColor = "#FF0000";
+                item.Width = "150";
+                item.Height = "40";
+            }
+            else if (string.Equals(type, "QRCode", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "Barcode", StringComparison.OrdinalIgnoreCase))
+            {
+                item.Text = "https://getgreenshot.org";
+                item.ForeColor = "#000000";
+                item.BackColor = "#FFFFFF";
+                item.QuietZone = 1;
+                item.RoundedDots = false;
+                if (string.Equals(type, "QRCode", StringComparison.OrdinalIgnoreCase))
+                {
+                    item.Width = "150";
+                    item.Height = "150";
+                }
+                else
+                {
+                    item.Width = "250";
+                    item.Height = "80";
+                }
+            }
+            else if (string.Equals(type, "Image", StringComparison.OrdinalIgnoreCase))
+            {
+                item.Width = "120";
+                item.Height = "120";
+            }
+            else if (string.Equals(type, "Cursor", StringComparison.OrdinalIgnoreCase))
+            {
+                item.CursorName = "Arrow";
+                item.Width = "32";
+                item.Height = "32";
+                item.LockAspectRatio = true;
+            }
+            else if (item.LockAspectRatio)
+            {
+                item.Width = "150";
+                item.Height = "150";
+            }
+            Annotations.Add(item);
+            SyncAnnotationsToConfig();
+        }
+
+        public void RemoveAnnotation(DrawableItemViewModel item)
+        {
+            if (item != null && Annotations.Contains(item))
+            {
+                Annotations.Remove(item);
+                SyncAnnotationsToConfig();
+            }
+        }
+
+        public void ImportAnnotations(IEnumerable<Dictionary<string, object>> annotations, bool replaceExisting = false)
+        {
+            if (annotations == null) return;
+            if (replaceExisting)
+            {
+                Annotations.Clear();
+            }
+            foreach (var dict in annotations)
+            {
+                Annotations.Add(DrawableItemViewModel.FromDictionary(dict, SyncAnnotationsToConfig, RemoveAnnotation));
+            }
+            SyncAnnotationsToConfig();
+        }
+
+        private static Window GetActiveWindow()
+        {
+            return Application.Current?.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
+                // Not a hidden window (MainWindow is just the first WPF window which was created)
+                ?? Application.Current?.Windows.OfType<Window>().FirstOrDefault(w => w.IsVisible);
+        }
+
+        private static MessageBoxResult ShowMessageBox(string messageBoxText, string caption, MessageBoxButton button, MessageBoxImage icon)
+        {
+            var owner = GetActiveWindow();
+            if (owner != null)
+            {
+                return ThemedMessageBox.Show(owner, messageBoxText, caption, button, icon);
+            }
+            return ThemedMessageBox.Show(messageBoxText, caption, button, icon);
+        }
+
+        private static void ShowInfoMessage(string messageBoxText, string caption, MessageBoxImage icon = MessageBoxImage.Information)
+        {
+            var owner = GetActiveWindow();
+            if (owner != null)
+            {
+                ThemedMessageBox.Show(owner, messageBoxText, caption, MessageBoxButton.OK, icon);
+            }
+            else
+            {
+                ThemedMessageBox.Show(messageBoxText, caption, MessageBoxButton.OK, icon);
+            }
+        }
+
+        private void ExecuteImportFromEditor()
+        {
+            var editors = Greenshot.Editor.Forms.ImageEditorForm.Editors;
+            if (editors == null || editors.Count == 0)
+            {
+                var result = ShowMessageBox(
+                    Texts.Get<IRecipeEditorLanguage>().ImportNoEditors + "\n\n" + Texts.Get<IRecipeEditorLanguage>().ImportAskGreenshotFile,
+                    Texts.Get<IRecipeEditorLanguage>().TitleNoEditors,
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Information);
+
+                if (result == MessageBoxResult.Yes)
+                {
+                    ExecuteImportFromGreenshotFile();
+                }
+                return;
+            }
+
+            IImageEditor chosenEditor = null;
+            if (editors.Count == 1)
+            {
+                chosenEditor = editors[0];
+            }
+            else
+            {
+                var owner = GetActiveWindow();
+                var dlg = new SelectEditorWindow(editors);
+                if (owner != null)
+                {
+                    dlg.Owner = owner;
+                }
+                else
+                {
+                    dlg.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+                }
+                if (dlg.ShowDialog() == true && dlg.SelectedEditor != null)
+                {
+                    chosenEditor = dlg.SelectedEditor;
+                }
+                else
+                {
+                    return;
+                }
+            }
+
+            if (chosenEditor?.Surface == null)
+            {
+                ShowInfoMessage(Texts.Get<IRecipeEditorLanguage>().ImportNoSurface, Texts.Get<IRecipeEditorLanguage>().TitleImportFailed, MessageBoxImage.Warning);
+                return;
+            }
+
+            var items = EditorAnnotationImporter.AnalyzeSurfaceElements(chosenEditor.Surface);
+            if (items.Count == 0)
+            {
+                ShowInfoMessage(Texts.Get<IRecipeEditorLanguage>().ImportEditorNoAnnotations, Texts.Get<IRecipeEditorLanguage>().TitleNoAnnotations, MessageBoxImage.Information);
+                return;
+            }
+
+            string sourceTitle = chosenEditor.CaptureDetails?.Title ?? chosenEditor.Surface?.CaptureDetails?.Title ?? Texts.Get<IRecipeEditorLanguage>().ImportSourceImageEditor;
+            string recipeName = RecipeNameProvider?.Invoke() ?? DisplayName;
+
+            var ownerWin = GetActiveWindow();
+            var importDlg = new ImportAnnotationsWindow(items, sourceTitle, recipeName, Annotations.Count > 0);
+            if (ownerWin != null)
+            {
+                importDlg.Owner = ownerWin;
+            }
+            else
+            {
+                importDlg.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            }
+
+            if (importDlg.ShowDialog() == true && importDlg.ResultAnnotations != null && importDlg.ResultAnnotations.Count > 0)
+            {
+                ImportAnnotations(importDlg.ResultAnnotations, importDlg.ShouldReplaceExisting);
+            }
+        }
+
+        private void ExecuteImportFromGreenshotFile()
+        {
+            string greenshotFile = FileDialogs.PickFileToOpen(IntPtr.Zero, Texts.Get<IRecipeEditorLanguage>().FilterGreenshot + "|*.greenshot" + "|" + Texts.Get<IRecipeEditorLanguage>().FilterAllFiles + "|*.*", Texts.Get<IRecipeEditorLanguage>().TitleSelectGreenshotFile);
+            if (greenshotFile != null)
+            {
+                try
+                {
+                    var surface = EditorAnnotationImporter.LoadSurfaceFromGreenshotFile(greenshotFile);
+                    var items = EditorAnnotationImporter.AnalyzeSurfaceElements(surface);
+                    if (items.Count == 0)
+                    {
+                        ShowInfoMessage(Texts.Get<IRecipeEditorLanguage>().ImportFileNoAnnotations, Texts.Get<IRecipeEditorLanguage>().TitleNoAnnotations, MessageBoxImage.Information);
+                        return;
+                    }
+
+                    string sourceTitle = System.IO.Path.GetFileName(greenshotFile);
+                    string recipeName = RecipeNameProvider?.Invoke() ?? DisplayName;
+
+                    var ownerWin = GetActiveWindow();
+                    var importDlg = new ImportAnnotationsWindow(items, sourceTitle, recipeName, Annotations.Count > 0);
+                    if (ownerWin != null)
+                    {
+                        importDlg.Owner = ownerWin;
+                    }
+                    else
+                    {
+                        importDlg.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+                    }
+
+                    if (importDlg.ShowDialog() == true && importDlg.ResultAnnotations != null && importDlg.ResultAnnotations.Count > 0)
+                    {
+                        ImportAnnotations(importDlg.ResultAnnotations, importDlg.ShouldReplaceExisting);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ShowInfoMessage(Texts.Get<IRecipeEditorLanguage>().ImportFileFailed + "\n" + ex.Message, Texts.Get<IRecipeEditorLanguage>().TitleImportError, MessageBoxImage.Error);
+                }
+            }
+        }
+
+        #region Typed Step Properties for Two-Way WPF Binding
+
+        // --- 1. Source Step ---
+        public string SourceType
+        {
+            get => GetParam("SourceType", "Region");
+            set { SetParam("SourceType", value); OnPropertyChanged(nameof(IsWindowSource)); OnPropertyChanged(nameof(IsFileSource)); }
+        }
+
+        public bool IsWindowSource => SourceType == "Window" || SourceType == "ActiveWindow";
+
+        public bool IsFileSource => SourceType == "File";
+
+        /// <summary>The file to load (SourceType File); empty uses the Filename variable of the flow.</summary>
+        public string SourceFilename
+        {
+            get => GetParam("Filename", "");
+            set { SetParamOrRemoveIfEmpty("Filename", value); OnPropertyChanged(nameof(SourceFilename)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public bool WindowMatchCase
+        {
+            get => GetParamBool("MatchCase", false);
+            set { SetParam("MatchCase", value); OnPropertyChanged(nameof(WindowMatchCase)); }
+        }
+
+        public string WindowTitlePattern
+        {
+            get => GetParam("WindowTitlePattern", "");
+            set => SetParam("WindowTitlePattern", value);
+        }
+
+        public string ProcessName
+        {
+            get => GetParam("ProcessName", "");
+            set => SetParam("ProcessName", value);
+        }
+
+        public string CaptureMouseCursorMode
+        {
+            get
+            {
+                if (Config.Parameters != null && Config.Parameters.TryGetValue("CaptureMouseCursor", out var val) && val != null)
+                {
+                    if (val is bool b) return b ? "true" : "false";
+                    if (bool.TryParse(val.ToString(), out bool pb)) return pb ? "true" : "false";
+                }
+                return "";
+            }
+            set
+            {
+                if (string.IsNullOrEmpty(value))
+                {
+                    Config.Parameters?.Remove("CaptureMouseCursor");
+                }
+                else
+                {
+                    SetParam("CaptureMouseCursor", value == "true");
+                }
+                OnPropertyChanged();
+                NotifyConfigUpdated();
+            }
+        }
+
+        public string DelayMs
+        {
+            get => GetParam("DelayMs", "0");
+            set { SetNumberParam("DelayMs", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        // --- 2. InteractiveSelection Step ---
+        public string SelectionMode
+        {
+            get => GetParam("SelectionMode", "Region");
+            set => SetParam("SelectionMode", value);
+        }
+
+        // --- 4. Effect Step ---
+        public string EffectType
+        {
+            get => GetParam("Effect", "DropShadow");
+            set
+            {
+                if (string.Equals(value, EffectType, StringComparison.Ordinal)) return;
+                // The values of the effect before don't belong to this one (Border's Color fails on a canvas)
+                if (Config.Parameters != null && value != null && EffectParameters.TryGetValue(value, out var keep))
+                {
+                    var unused = EffectParameters.Values.SelectMany(keys => keys).Distinct()
+                        .Where(key => !keep.Contains(key, StringComparer.OrdinalIgnoreCase)).ToList();
+                    // Width is the border width for Border and the new width for Resize
+                    if (keep.Contains("Width") && EffectParameters.TryGetValue(EffectType, out var before) && before.Contains("Width")) unused.Add("Width");
+                    foreach (var key in Config.Parameters.Keys.Where(key => unused.Contains(key, StringComparer.OrdinalIgnoreCase)).ToList())
+                    {
+                        Config.Parameters.Remove(key);
+                    }
+                }
+                SetParam("Effect", value);
+                NotifyEffectProperties();
+            }
+        }
+
+        /// <summary>
+        /// The parameters each effect uses, see the Effect step contract
+        /// </summary>
+        private static readonly Dictionary<string, string[]> EffectParameters = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Border"] = new[] { "Width", "Color" },
+            ["DropShadow"] = new[] { "Darkness", "ShadowSize", "ShadowOffsetX", "ShadowOffsetY" },
+            ["TornEdge"] = new[] { "ToothHeight", "HorizontalToothRange", "VerticalToothRange", "GenerateShadow", "Edges", "ShadowSize", "Darkness" },
+            ["Invert"] = Array.Empty<string>(),
+            ["Grayscale"] = Array.Empty<string>(),
+            ["Monochrome"] = new[] { "Threshold" },
+            ["Adjust"] = new[] { "Brightness", "Contrast", "Gamma" },
+            ["Rotate"] = new[] { "Angle" },
+            ["Resize"] = new[] { "Width", "Height", "Percentage", "MaintainAspectRatio" },
+            ["ResizeCanvas"] = new[] { "Left", "Right", "Top", "Bottom", "BackgroundColor" },
+            ["ReduceColors"] = new[] { "Colors" },
+            ["RemoveTransparency"] = new[] { "BackgroundColor" },
+        };
+
+        public bool IsBorderEffect => string.Equals(EffectType, "Border", StringComparison.OrdinalIgnoreCase);
+        public bool IsDropShadowEffect => string.Equals(EffectType, "DropShadow", StringComparison.OrdinalIgnoreCase);
+        public bool IsTornEdgeEffect => string.Equals(EffectType, "TornEdge", StringComparison.OrdinalIgnoreCase);
+        public bool IsGrayscaleEffect => string.Equals(EffectType, "Grayscale", StringComparison.OrdinalIgnoreCase);
+        public bool IsInvertEffect => string.Equals(EffectType, "Invert", StringComparison.OrdinalIgnoreCase);
+        public bool IsMonochromeEffect => string.Equals(EffectType, "Monochrome", StringComparison.OrdinalIgnoreCase);
+        public bool IsAdjustEffect => string.Equals(EffectType, "Adjust", StringComparison.OrdinalIgnoreCase);
+        public bool IsRotateEffect => string.Equals(EffectType, "Rotate", StringComparison.OrdinalIgnoreCase);
+        public bool IsResizeEffect => string.Equals(EffectType, "Resize", StringComparison.OrdinalIgnoreCase);
+        public bool IsResizeCanvasEffect => string.Equals(EffectType, "ResizeCanvas", StringComparison.OrdinalIgnoreCase);
+        public bool IsReduceColorsEffect => string.Equals(EffectType, "ReduceColors", StringComparison.OrdinalIgnoreCase);
+        public bool IsRemoveTransparencyEffect => string.Equals(EffectType, "RemoveTransparency", StringComparison.OrdinalIgnoreCase);
+
+        public void NotifyEffectProperties()
+        {
+            OnPropertyChanged(nameof(EffectType));
+            OnPropertyChanged(nameof(IsBorderEffect));
+            OnPropertyChanged(nameof(IsDropShadowEffect));
+            OnPropertyChanged(nameof(IsTornEdgeEffect));
+            OnPropertyChanged(nameof(IsGrayscaleEffect));
+            OnPropertyChanged(nameof(IsInvertEffect));
+            OnPropertyChanged(nameof(IsMonochromeEffect));
+            OnPropertyChanged(nameof(IsAdjustEffect));
+            OnPropertyChanged(nameof(IsRotateEffect));
+            OnPropertyChanged(nameof(IsResizeEffect));
+            OnPropertyChanged(nameof(IsResizeCanvasEffect));
+            OnPropertyChanged(nameof(IsReduceColorsEffect));
+            OnPropertyChanged(nameof(IsRemoveTransparencyEffect));
+            OnPropertyChanged(nameof(EffectBorderWidth));
+            OnPropertyChanged(nameof(EffectBorderColor));
+            OnPropertyChanged(nameof(ShadowSize));
+            OnPropertyChanged(nameof(ShadowDarkness));
+            OnPropertyChanged(nameof(ShadowOffsetX));
+            OnPropertyChanged(nameof(ShadowOffsetY));
+            OnPropertyChanged(nameof(ToothHeight));
+            OnPropertyChanged(nameof(HorizontalToothRange));
+            OnPropertyChanged(nameof(VerticalToothRange));
+            OnPropertyChanged(nameof(TornEdgeShadow));
+            OnPropertyChanged(nameof(TornEdges));
+            OnPropertyChanged(nameof(MonochromeThreshold));
+            OnPropertyChanged(nameof(AdjustBrightness));
+            OnPropertyChanged(nameof(AdjustContrast));
+            OnPropertyChanged(nameof(AdjustGamma));
+            OnPropertyChanged(nameof(RotateAngle));
+            OnPropertyChanged(nameof(ResizeWidth));
+            OnPropertyChanged(nameof(ResizeHeight));
+            OnPropertyChanged(nameof(ResizePercentage));
+            OnPropertyChanged(nameof(ResizeMaintainAspectRatio));
+            OnPropertyChanged(nameof(CanvasLeft));
+            OnPropertyChanged(nameof(CanvasTop));
+            OnPropertyChanged(nameof(CanvasRight));
+            OnPropertyChanged(nameof(CanvasBottom));
+            OnPropertyChanged(nameof(CanvasBackgroundColor));
+            OnPropertyChanged(nameof(ReduceColorsCount));
+            OnPropertyChanged(nameof(TransparencyBackgroundColor));
+            OnPropertyChanged(nameof(Summary));
+        }
+
+        // Border Effect Parameters
+        public string EffectBorderWidth
+        {
+            get => GetParam("Width", "2");
+            set { SetNumberParam("Width", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string EffectBorderColor
+        {
+            get => GetParam("Color", "#000000");
+            set { SetParam("Color", value); OnPropertyChanged(nameof(EffectBorderColor)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        // Drop Shadow Parameters
+        public string ShadowSize
+        {
+            get => GetParam("ShadowSize", "7");
+            set { SetNumberParam("ShadowSize", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string ShadowDarkness
+        {
+            get => GetParam("Darkness", "0.6");
+            set { SetNumberParam("Darkness", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string ShadowOffsetX
+        {
+            get => GetParam("ShadowOffsetX", "-1");
+            set { SetNumberParam("ShadowOffsetX", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string ShadowOffsetY
+        {
+            get => GetParam("ShadowOffsetY", "-1");
+            set { SetNumberParam("ShadowOffsetY", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        // Torn Edge Parameters
+        public string ToothHeight
+        {
+            get => GetParam("ToothHeight", "12");
+            set { SetNumberParam("ToothHeight", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string HorizontalToothRange
+        {
+            get => GetParam("HorizontalToothRange", "20");
+            set { SetNumberParam("HorizontalToothRange", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string VerticalToothRange
+        {
+            get => GetParam("VerticalToothRange", "20");
+            set { SetNumberParam("VerticalToothRange", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public bool TornEdgeShadow
+        {
+            get => bool.TryParse(GetParam("GenerateShadow", "true"), out bool b) ? b : true;
+            set { SetParam("GenerateShadow", value); OnPropertyChanged(nameof(TornEdgeShadow)); }
+        }
+
+        private static readonly string[] TornEdgeNames = { "Top", "Right", "Bottom", "Left" };
+        private string _tornEdgesText;
+
+        /// <summary>
+        /// The torn edges separated by commas; in the recipe "Edges" is a list of Top, Right, Bottom, Left (left out for all)
+        /// </summary>
+        public string TornEdges
+        {
+            get
+            {
+                var edges = Config?.GetParameter<List<string>>("Edges") ?? TornEdgeNames.ToList();
+                // What was typed, as long as it is still the list in the recipe (keeps a trailing comma while typing)
+                return _tornEdgesText != null && ToTornEdges(_tornEdgesText).SequenceEqual(edges) ? _tornEdgesText : string.Join(", ", edges);
+            }
+            set
+            {
+                _tornEdgesText = value;
+                SetParam("Edges", ToTornEdges(value));
+                OnPropertyChanged(nameof(TornEdges));
+                OnPropertyChanged(nameof(Summary));
+            }
+        }
+
+        // Written as declared; a name which isn't an edge stays as typed, the validator reports it
+        private static List<string> ToTornEdges(string text) => RecipeSlots.SplitList(text)
+            .Select(e => TornEdgeNames.FirstOrDefault(n => string.Equals(n, e, StringComparison.OrdinalIgnoreCase)) ?? e)
+            .ToList();
+
+        // Monochrome Parameters
+        public string MonochromeThreshold
+        {
+            get => GetParam("Threshold", "128");
+            set { SetNumberParam("Threshold", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        // Adjust Parameters
+        public string AdjustBrightness
+        {
+            get => GetParam("Brightness", "1.0");
+            set { SetNumberParam("Brightness", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string AdjustContrast
+        {
+            get => GetParam("Contrast", "1.0");
+            set { SetNumberParam("Contrast", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string AdjustGamma
+        {
+            get => GetParam("Gamma", "1.0");
+            set { SetNumberParam("Gamma", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        // Rotate Parameters
+        public string RotateAngle
+        {
+            get => GetParam("Angle", "90");
+            set { SetNumberParam("Angle", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        // Resize Parameters
+        // A resize has a size or a percentage: entering one removes the other
+        public string ResizeWidth
+        {
+            get => GetParam("Width", "0");
+            set { SetResizeSize("Width", value); OnPropertyChanged(nameof(ResizeWidth)); }
+        }
+
+        public string ResizeHeight
+        {
+            get => GetParam("Height", "0");
+            set { SetResizeSize("Height", value); OnPropertyChanged(nameof(ResizeHeight)); }
+        }
+
+        public string ResizePercentage
+        {
+            get => GetParam("Percentage", "0");
+            set
+            {
+                if (IsUnset(value))
+                {
+                    Config.Parameters?.Remove("Percentage");
+                }
+                else
+                {
+                    SetParam("Percentage", value);
+                    Config.Parameters.Remove("Width");
+                    Config.Parameters.Remove("Height");
+                }
+                NotifyConfigUpdated();
+                OnPropertyChanged(nameof(ResizePercentage));
+                OnPropertyChanged(nameof(ResizeWidth));
+                OnPropertyChanged(nameof(ResizeHeight));
+                OnPropertyChanged(nameof(Summary));
+            }
+        }
+
+        private void SetResizeSize(string key, string value)
+        {
+            if (IsUnset(value))
+            {
+                Config.Parameters?.Remove(key);
+            }
+            else
+            {
+                SetParam(key, value);
+                Config.Parameters.Remove("Percentage");
+            }
+            NotifyConfigUpdated();
+            OnPropertyChanged(nameof(ResizePercentage));
+            OnPropertyChanged(nameof(Summary));
+        }
+
+        private static bool IsUnset(string value) => string.IsNullOrWhiteSpace(value) || value.Trim() == "0";
+
+        public bool ResizeMaintainAspectRatio
+        {
+            get => bool.TryParse(GetParam("MaintainAspectRatio", "true"), out bool b) ? b : true;
+            set { SetParam("MaintainAspectRatio", value); OnPropertyChanged(nameof(ResizeMaintainAspectRatio)); }
+        }
+
+        // Resize Canvas Parameters
+        public string CanvasLeft
+        {
+            get => GetParam("Left", "0");
+            set { SetNumberParam("Left", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string CanvasTop
+        {
+            get => GetParam("Top", "0");
+            set { SetNumberParam("Top", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string CanvasRight
+        {
+            get => GetParam("Right", "0");
+            set { SetNumberParam("Right", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string CanvasBottom
+        {
+            get => GetParam("Bottom", "0");
+            set { SetNumberParam("Bottom", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string CanvasBackgroundColor
+        {
+            get => GetParam("BackgroundColor", "");
+            set { SetParamOrRemoveIfEmpty("BackgroundColor", value); OnPropertyChanged(nameof(CanvasBackgroundColor)); }
+        }
+
+        // Reduce Colors Parameters
+        public string ReduceColorsCount
+        {
+            get => GetParam("Colors", "256");
+            set { SetNumberParam("Colors", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        // Remove Transparency Parameters
+        public string TransparencyBackgroundColor
+        {
+            get => GetParam("BackgroundColor", "#FFFFFF");
+            set { SetParamOrRemoveIfEmpty("BackgroundColor", value); OnPropertyChanged(nameof(TransparencyBackgroundColor)); }
+        }
+
+        // --- 5. TextEffect / ObfuscateText Step ---
+        public string TextEffectAction
+        {
+            get => GetParam("Effect", "Redact");
+            set => SetParam("Effect", value);
+        }
+
+        public string TextEffectFillColor
+        {
+            get => GetParam("FillColor", "#000000");
+            set => SetParam("FillColor", value);
+        }
+
+        /// <summary>The Patterns list, one regular expression per line.</summary>
+        public string TextEffectPatterns
+        {
+            get
+            {
+                var patterns = Config.GetParameter<List<string>>("Patterns");
+                return patterns != null ? string.Join(Environment.NewLine, patterns) : "";
+            }
+            set
+            {
+                var patterns = (value ?? "").Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Where(line => !string.IsNullOrWhiteSpace(line))
+                    .ToList();
+                SetParam("Patterns", patterns);
+                OnPropertyChanged(nameof(TextEffectPatterns));
+                OnPropertyChanged(nameof(Summary));
+            }
+        }
+
+        // --- 6. Conditional Step ---
+        public void AddConditionBranch(string key = null, string expression = null)
+        {
+            if (string.IsNullOrEmpty(key))
+            {
+                key = FreeKey(ConditionBranches.Select(b => b.Key), number => number <= 26 ? ((char)('A' + number - 1)).ToString() : $"C{number}");
+            }
+            if (string.IsNullOrEmpty(expression))
+            {
+                expression = "${true}";
+            }
+
+            var branch = new ConditionBranchViewModel(key, expression, this, SyncConditionBranchesToConfig, RemoveConditionBranch);
+            ConditionBranches.Add(branch);
+            Output.Add(branch.Port);
+            SyncConditionBranchesToConfig();
+            OnPropertyChanged(nameof(Summary));
+        }
+
+        /// <summary>
+        /// The first key which no branch or choice has yet: after removing B of A, B, C the next one is B again, not a second C
+        /// </summary>
+        private static string FreeKey(IEnumerable<string> keys, Func<int, string> keyFor)
+        {
+            var taken = new HashSet<string>(keys.Where(k => k != null), StringComparer.OrdinalIgnoreCase);
+            int number = 1;
+            while (taken.Contains(keyFor(number))) number++;
+            return keyFor(number);
+        }
+
+        /// <summary>
+        /// Called when a branch or choice is removed, the editor removes the connections from its pin
+        /// </summary>
+        public Action<StepPortViewModel> PortRemovedHandler { get; set; }
+
+        public void RemoveConditionBranch(ConditionBranchViewModel branch)
+        {
+            if (branch == null) return;
+            if (ConditionBranches.Count <= 1) return; // Keep at least 1 branch
+
+            ConditionBranches.Remove(branch);
+            Output.Remove(branch.Port);
+            PortRemovedHandler?.Invoke(branch.Port);
+            SyncConditionBranchesToConfig();
+            OnPropertyChanged(nameof(Summary));
+        }
+
+        private void LoadConditionBranches()
+        {
+            var configured = (Config.GetParameter<List<ConditionalBranch>>("Branches") ?? new List<ConditionalBranch>())
+                .Where(b => !string.IsNullOrEmpty(b?.Key) || !string.IsNullOrEmpty(b?.Expression))
+                .ToList();
+            bool useDefaults = configured.Count == 0;
+            if (useDefaults)
+            {
+                configured.Add(new ConditionalBranch("A", "${payload.width > 800}"));
+                configured.Add(new ConditionalBranch("B", "else"));
+            }
+
+            var previous = ConditionBranches.ToList();
+            var branches = new List<ConditionBranchViewModel>();
+            foreach (var branch in configured)
+            {
+                string key = branch.Key ?? "A";
+                var existing = previous.FirstOrDefault(b => string.Equals(b.Key, key, StringComparison.Ordinal));
+                if (existing != null)
+                {
+                    previous.Remove(existing);
+                    existing.Apply(branch);
+                    branches.Add(existing);
+                }
+                else
+                {
+                    branches.Add(new ConditionBranchViewModel(key, branch.Expression ?? "${true}", this, SyncConditionBranchesToConfig, RemoveConditionBranch));
+                }
+            }
+            SetPinItems(ConditionBranches, branches, previous, b => b.Port);
+
+            if (useDefaults)
+            {
+                SyncConditionBranchesToConfig();
+            }
+        }
+
+        /// <summary>
+        /// Shows the branches or choices of the node, each with its output pin. A branch or choice which is still there keeps its
+        /// view model and pin, so the connections from it stay when the node reloads its settings (e.g. after its title changed).
+        /// The connections from the pins of the removed ones are removed.
+        /// </summary>
+        private void SetPinItems<T>(ObservableCollection<T> items, List<T> newItems, List<T> removed, Func<T, StepPortViewModel> port)
+        {
+            if (!items.SequenceEqual(newItems))
+            {
+                foreach (var old in items) Output.Remove(port(old));
+                items.Clear();
+                foreach (var item in newItems)
+                {
+                    items.Add(item);
+                    Output.Add(port(item));
+                }
+            }
+            Output.Remove(OutputPort);
+            foreach (var item in removed)
+            {
+                PortRemovedHandler?.Invoke(port(item));
+            }
+        }
+
+        private void SyncConditionBranchesToConfig()
+        {
+            Config.Set("Branches", ConditionBranches.Select(b => new ConditionalBranch(b.Key, b.Expression)).ToList());
+            Config.Parameters?.Remove("Condition");
+            Config.Parameters?.Remove("condition");
+            OnPropertyChanged(nameof(Summary));
+        }
+
+        public void AddPromptChoice(string key, string label, string style = "Primary", bool isDefault = false, bool isCancel = false)
+        {
+            if (string.IsNullOrEmpty(key))
+            {
+                key = $"Choice{PromptChoices.Count + 1}";
+            }
+            if (string.IsNullOrEmpty(label))
+            {
+                label = key;
+            }
+
+            var choice = new PromptChoiceViewModel(key, label, style, isDefault, isCancel, this, SyncPromptChoicesToConfig, RemovePromptChoice);
+            PromptChoices.Add(choice);
+            Output.Remove(OutputPort);
+            Output.Add(choice.Port);
+            SyncPromptChoicesToConfig();
+            OnPropertyChanged(nameof(Summary));
+        }
+
+        public void RemovePromptChoice(PromptChoiceViewModel choice)
+        {
+            if (choice == null) return;
+            if (PromptChoices.Count <= 1) return; // Keep at least 1 choice
+
+            PromptChoices.Remove(choice);
+            Output.Remove(choice.Port);
+            PortRemovedHandler?.Invoke(choice.Port);
+            SyncPromptChoicesToConfig();
+            OnPropertyChanged(nameof(Summary));
+        }
+
+        private void LoadPromptChoices()
+        {
+            var configured = (Config.GetParameter<List<PromptChoice>>("Choices") ?? new List<PromptChoice>())
+                .Where(c => !string.IsNullOrEmpty(c?.Key))
+                .ToList();
+            bool useDefaults = configured.Count == 0;
+            if (useDefaults)
+            {
+                configured.Add(new PromptChoice("Yes", "Yes, Proceed", "Primary", isDefault: true));
+                configured.Add(new PromptChoice("No", "No, Cancel", "Secondary", isCancel: true));
+            }
+
+            var previous = PromptChoices.ToList();
+            var choices = new List<PromptChoiceViewModel>();
+            foreach (var choice in configured)
+            {
+                var existing = previous.FirstOrDefault(c => string.Equals(c.Key, choice.Key, StringComparison.Ordinal));
+                if (existing != null)
+                {
+                    previous.Remove(existing);
+                    existing.Apply(choice);
+                    choices.Add(existing);
+                }
+                else
+                {
+                    choices.Add(new PromptChoiceViewModel(choice.Key, choice.Label ?? choice.Key, choice.Style ?? "Primary", choice.IsDefault, choice.IsCancel, this, SyncPromptChoicesToConfig, RemovePromptChoice));
+                }
+            }
+            SetPinItems(PromptChoices, choices, previous, c => c.Port);
+
+            if (useDefaults)
+            {
+                SyncPromptChoicesToConfig();
+            }
+        }
+
+        private void SyncPromptChoicesToConfig()
+        {
+            Config.Set("Choices", PromptChoices.Select(c => c.ToPromptChoice()).ToList());
+            OnPropertyChanged(nameof(Summary));
+        }
+
+        // --- 7. Notification Step ---
+        public bool NotificationShow
+        {
+            get => GetParamBool("ShowNotification", true);
+            set { SetParam("ShowNotification", value); OnPropertyChanged(nameof(NotificationShow)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        // --- Stdout / Stderr Steps ---
+        public string OutputText
+        {
+            get => GetParam("Text", "");
+            set { SetParam("Text", value); OnPropertyChanged(nameof(OutputText)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        // --- ShowInExplorer / OpenWindow Steps ---
+        public string ShowInExplorerPath
+        {
+            get => GetParam("Path", "");
+            set { SetParam("Path", value); OnPropertyChanged(nameof(ShowInExplorerPath)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string OpenWindowWindow
+        {
+            get => GetParam("Window", "Settings");
+            set { SetParam("Window", value); OnPropertyChanged(nameof(OpenWindowWindow)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        // --- Delay Step ---
+        public string DelaySeconds
+        {
+            get => GetParam("Seconds", "5");
+            set { SetNumberParam("Seconds", value); OnPropertyChanged(nameof(DelaySeconds)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public bool DelayAskUser
+        {
+            get => GetParamBool("AskUser", false);
+            set { SetParam("AskUser", value); OnPropertyChanged(nameof(DelayAskUser)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public bool DelayShowCountdown
+        {
+            get => GetParamBool("ShowCountdown", true);
+            set { SetParam("ShowCountdown", value); OnPropertyChanged(nameof(DelayShowCountdown)); }
+        }
+
+        public string StderrExitCode
+        {
+            get => GetParam("ExitCode", "1");
+            set { SetNumberParam("ExitCode", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public bool StderrAbort
+        {
+            get => GetParamBool("Abort", true);
+            set { SetParam("Abort", value); OnPropertyChanged(nameof(StderrAbort)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        // --- 8. ImmediateFeedback Step ---
+        public bool PlaySound
+        {
+            get => GetParamBool("PlaySound", true);
+            set => SetParam("PlaySound", value);
+        }
+
+        public string SoundFilePath
+        {
+            get => GetParam("SoundFilePath", "");
+            set
+            {
+                SetParamOrRemoveIfEmpty("SoundFilePath", value);
+                OnPropertyChanged(nameof(SoundFilePath));
+                OnPropertyChanged(nameof(Summary));
+            }
+        }
+
+        // --- 9. Destinations Step ---
+        public bool DestinationEditor
+        {
+            get => HasDestination("Editor");
+            set => ToggleDestination("Editor", value);
+        }
+
+        public bool DestinationClipboard
+        {
+            get => HasDestination("Clipboard");
+            set => ToggleDestination("Clipboard", value);
+        }
+
+        public bool DestinationFile
+        {
+            get => HasDestination("FileNoDialog");
+            set => ToggleDestination("FileNoDialog", value);
+        }
+
+        public bool DestinationPrinter
+        {
+            get => HasDestination("Printer");
+            set => ToggleDestination("Printer", value);
+        }
+
+        public bool DestinationEmail
+        {
+            get => HasDestination("EMail");
+            set => ToggleDestination("EMail", value);
+        }
+
+        public string SaveDirectory
+        {
+            get => GetParam("SaveDirectory", "");
+            set { SetParam("SaveDirectory", value); OnPropertyChanged(nameof(SaveDirectory)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string FilenamePattern
+        {
+            get => GetParam("FilenamePattern", Greenshot.Base.Expressions.OutputTemplates.DefaultFileName);
+            set { SetParam("FilenamePattern", value); OnPropertyChanged(nameof(FilenamePattern)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string ImageFormat
+        {
+            get => GetParam("Format", "png");
+            set { SetParam("Format", value); OnPropertyChanged(nameof(ImageFormat)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string CustomDestinationsText
+        {
+            get
+            {
+                var list = GetDestinationList();
+                var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Editor", "Clipboard", "FileNoDialog", "Printer", "EMail" };
+                var customs = list.Where(d => !known.Contains(d)).ToList();
+                return string.Join(", ", customs);
+            }
+            set
+            {
+                var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Editor", "Clipboard", "FileNoDialog", "Printer", "EMail" };
+                var current = GetDestinationList().Where(d => known.Contains(d)).ToList();
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    var customItems = value.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s));
+                    foreach (var item in customItems)
+                    {
+                        if (!current.Contains(item, StringComparer.OrdinalIgnoreCase))
+                        {
+                            current.Add(item);
+                        }
+                    }
+                }
+                SetParam("DestinationDesignations", current);
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(Summary));
+            }
+        }
+
+        public string CustomDestinationId
+        {
+            get => GetParam("CustomDestinationId", "");
+            set { SetParam("CustomDestinationId", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        // --- 10. Dedicated Clipboard Step ---
+        public string ClipboardMode
+        {
+            get => GetParam("ClipboardMode", "ImageOnly");
+            set
+            {
+                SetParam("ClipboardMode", value);
+                OnPropertyChanged(nameof(ClipboardMode));
+                OnPropertyChanged(nameof(IsClipboardTextEnabled));
+                OnPropertyChanged(nameof(Summary));
+            }
+        }
+
+        public bool IsClipboardTextEnabled => string.Equals(ClipboardMode, "TextOnly", StringComparison.OrdinalIgnoreCase) ||
+                                              string.Equals(ClipboardMode, "ImageAndText", StringComparison.OrdinalIgnoreCase) ||
+                                              ClipboardFormatText;
+
+        public bool ClipboardFormatPNG
+        {
+            get => GetParamBool("ClipboardFormatPNG", true);
+            set { SetParam("ClipboardFormatPNG", value); OnPropertyChanged(nameof(ClipboardFormatPNG)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public bool ClipboardFormatDIB
+        {
+            get => GetParamBool("ClipboardFormatDIB", true);
+            set { SetParam("ClipboardFormatDIB", value); OnPropertyChanged(nameof(ClipboardFormatDIB)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public bool ClipboardFormatDIBV5
+        {
+            get => GetParamBool("ClipboardFormatDIBV5", false);
+            set { SetParam("ClipboardFormatDIBV5", value); OnPropertyChanged(nameof(ClipboardFormatDIBV5)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public bool ClipboardFormatBitmap
+        {
+            get => GetParamBool("ClipboardFormatBitmap", false);
+            set { SetParam("ClipboardFormatBitmap", value); OnPropertyChanged(nameof(ClipboardFormatBitmap)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public bool ClipboardFormatHTML
+        {
+            get => GetParamBool("ClipboardFormatHTML", true);
+            set { SetParam("ClipboardFormatHTML", value); OnPropertyChanged(nameof(ClipboardFormatHTML)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public bool ClipboardFormatHTMLDataUrl
+        {
+            get => GetParamBool("ClipboardFormatHTMLDataUrl", false);
+            set { SetParam("ClipboardFormatHTMLDataUrl", value); OnPropertyChanged(nameof(ClipboardFormatHTMLDataUrl)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public bool ClipboardFormatText
+        {
+            get => GetParamBool("ClipboardFormatText", false);
+            set
+            {
+                SetParam("ClipboardFormatText", value);
+                OnPropertyChanged(nameof(ClipboardFormatText));
+                OnPropertyChanged(nameof(IsClipboardTextEnabled));
+                OnPropertyChanged(nameof(Summary));
+            }
+        }
+
+        public string ClipboardCustomText
+        {
+            get => GetParam("ClipboardCustomText", "${payload.ocr.text}");
+            set { SetParam("ClipboardCustomText", value); OnPropertyChanged(nameof(ClipboardCustomText)); }
+        }
+
+        // --- Dynamic Destination Step Properties ---
+        public string DynamicDestinationTitle
+        {
+            get => GetParam("Title", "Export Capture");
+            set
+            {
+                SetParam("Title", value);
+                OnPropertyChanged(nameof(DynamicDestinationTitle));
+                OnPropertyChanged(nameof(Summary));
+            }
+        }
+
+        public bool DynamicDestinationShowPreview
+        {
+            get => GetParamBool("ShowPreview", true);
+            set
+            {
+                SetParam("ShowPreview", value);
+                OnPropertyChanged(nameof(DynamicDestinationShowPreview));
+                OnPropertyChanged(nameof(Summary));
+            }
+        }
+
+        public string DynamicDestinationTimeoutSeconds
+        {
+            get => GetParam("TimeoutSeconds", "0");
+            set { SetNumberParam("TimeoutSeconds", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string DynamicDestinationSpecificDestinations
+        {
+            get
+            {
+                if (Config.Parameters.TryGetValue("Destinations", out var obj))
+                {
+                    if (obj is string s) return s;
+                    if (obj is IEnumerable list) return string.Join(", ", list.Cast<object>());
+                }
+                return "";
+            }
+            set
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    Config.Parameters.Remove("Destinations");
+                }
+                else
+                {
+                    var items = value.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                                     .Select(s => s.Trim())
+                                     .Where(s => !string.IsNullOrEmpty(s))
+                                     .ToList();
+                    Config.Parameters["Destinations"] = items;
+                }
+                OnPropertyChanged(nameof(DynamicDestinationSpecificDestinations));
+                OnPropertyChanged(nameof(Summary));
+            }
+        }
+
+        // --- Step Error Handling Properties ---
+        public Func<IEnumerable<StepNodeViewModel>> OtherNodesProvider { get; set; }
+        public Func<IEnumerable<CaptureRecipe>> AvailableRecipesProvider { get; set; }
+
+        public IEnumerable<StepNodeViewModel> AvailableTargetSteps => OtherNodesProvider?.Invoke()?.Where(n => n != this) ?? Enumerable.Empty<StepNodeViewModel>();
+        public IEnumerable<CaptureRecipe> AvailableTargetRecipes => AvailableRecipesProvider?.Invoke() ?? Enumerable.Empty<CaptureRecipe>();
+
+        /// <summary>
+        /// The error transition of the recipe from this step for any error, null when there is none.
+        /// </summary>
+        public Func<string, ErrorTransitionItemViewModel> StepErrorTransitionProvider { get; set; }
+
+        /// <summary>
+        /// Sets the error transition from this step for any error (step id, target step, target recipe), both targets null remove it.
+        /// </summary>
+        public Action<string, string, string> StepErrorTransitionSetter { get; set; }
+
+        private ErrorTransitionItemViewModel StepErrorTransition => StepErrorTransitionProvider?.Invoke(Id);
+
+        public string OnErrorAction
+        {
+            get
+            {
+                if (!string.IsNullOrEmpty(OnErrorRecipeId)) return "Recipe";
+                if (!string.IsNullOrEmpty(OnErrorNodeId)) return "Step";
+                return "Default";
+            }
+            set
+            {
+                if (string.Equals(value, "Step", StringComparison.OrdinalIgnoreCase))
+                {
+                    SetStepErrorTransition(OnErrorNodeId ?? AvailableTargetSteps.FirstOrDefault()?.Id, null);
+                }
+                else if (string.Equals(value, "Recipe", StringComparison.OrdinalIgnoreCase))
+                {
+                    SetStepErrorTransition(null, OnErrorRecipeId ?? AvailableTargetRecipes.FirstOrDefault()?.Id);
+                }
+                else
+                {
+                    SetStepErrorTransition(null, null);
+                }
+            }
+        }
+
+        public bool IsOnErrorStep => string.Equals(OnErrorAction, "Step", StringComparison.OrdinalIgnoreCase);
+        public bool IsOnErrorRecipe => string.Equals(OnErrorAction, "Recipe", StringComparison.OrdinalIgnoreCase);
+
+        public string OnErrorNodeId
+        {
+            get
+            {
+                var transition = StepErrorTransition;
+                return transition != null && transition.IsTargetStep && !string.IsNullOrEmpty(transition.ToNodeId) ? transition.ToNodeId : null;
+            }
+            set
+            {
+                // An empty choice (the list of the other target hidden) changes nothing, "Default" removes the error transition
+                if (!string.IsNullOrWhiteSpace(value)) SetStepErrorTransition(value, null);
+            }
+        }
+
+        public string OnErrorRecipeId
+        {
+            get
+            {
+                var transition = StepErrorTransition;
+                return transition != null && transition.IsTargetRecipe && !string.IsNullOrEmpty(transition.TargetRecipeId) ? transition.TargetRecipeId : null;
+            }
+            set
+            {
+                if (!string.IsNullOrWhiteSpace(value)) SetStepErrorTransition(null, value);
+            }
+        }
+
+        private void SetStepErrorTransition(string toNodeId, string recipeId)
+        {
+            StepErrorTransitionSetter?.Invoke(Id, toNodeId, recipeId);
+            RefreshErrorRouting();
+        }
+
+        /// <summary>
+        /// Shows the error transition of this step again, after it was changed here or in the recipe's list of error transitions.
+        /// </summary>
+        public void RefreshErrorRouting()
+        {
+            OnPropertyChanged(nameof(OnErrorNodeId));
+            OnPropertyChanged(nameof(OnErrorRecipeId));
+            OnPropertyChanged(nameof(OnErrorAction));
+            OnPropertyChanged(nameof(IsOnErrorStep));
+            OnPropertyChanged(nameof(IsOnErrorRecipe));
+        }
+
+        // --- 12. UserPrompt Step ---
+        public string UserPromptTitle
+        {
+            get => GetParam("Title", "Decision Required");
+            set { SetParam("Title", value); OnPropertyChanged(nameof(UserPromptTitle)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string UserPromptMessage
+        {
+            get => GetParam("Message", "Please choose how to proceed:");
+            set { SetParam("Message", value); OnPropertyChanged(nameof(UserPromptMessage)); }
+        }
+
+        public bool UserPromptShowPreview
+        {
+            get => GetParamBool("ShowPreview", true);
+            set { SetParam("ShowPreview", value); OnPropertyChanged(nameof(UserPromptShowPreview)); }
+        }
+
+        public string UserPromptTimeoutSeconds
+        {
+            get => GetParam("TimeoutSeconds", "0");
+            set { SetNumberParam("TimeoutSeconds", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        // --- Configuration Fallback Properties across Steps ---
+        public string ScreenCaptureMode
+        {
+            get => GetParam("ScreenCaptureMode", "");
+            set { SetParamOrRemoveIfEmpty("ScreenCaptureMode", value); OnPropertyChanged(nameof(ScreenCaptureMode)); }
+        }
+
+        public string AlignDpiMode
+        {
+            get => GetTriStateParam("AlignDpi");
+            set { SetTriStateParam("AlignDpi", value); OnPropertyChanged(nameof(AlignDpiMode)); }
+        }
+
+        public string SourceScreenMode
+        {
+            get => GetParam("ScreenMode", "");
+            set { SetParamOrRemoveIfEmpty("ScreenMode", value); OnPropertyChanged(nameof(SourceScreenMode)); }
+        }
+
+        public string SourceHdr
+        {
+            get => GetTriStateParam("Hdr");
+            set { SetTriStateParam("Hdr", value); OnPropertyChanged(nameof(SourceHdr)); }
+        }
+
+        public string AllowWindowSnappingMode
+        {
+            get => GetTriStateParam("AllowWindowSnapping");
+            set { SetTriStateParam("AllowWindowSnapping", value); OnPropertyChanged(nameof(AllowWindowSnappingMode)); }
+        }
+
+        public string OutputFileFormat
+        {
+            get => GetParam("Format", "");
+            set { SetParamOrRemoveIfEmpty("Format", value); OnPropertyChanged(nameof(OutputFileFormat)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string OutputFilePromptQuality
+        {
+            get => GetTriStateParam("PromptQuality");
+            set { SetTriStateParam("PromptQuality", value); OnPropertyChanged(nameof(OutputFilePromptQuality)); }
+        }
+
+        public string OutputFileIfExists
+        {
+            get => GetParam("IfFileExists", "");
+            set { SetParamOrRemoveIfEmpty("IfFileExists", value); OnPropertyChanged(nameof(OutputFileIfExists)); }
+        }
+
+        public string OutputFileCopyPath
+        {
+            get => GetTriStateParam("CopyPathToClipboard");
+            set { SetTriStateParam("CopyPathToClipboard", value); OnPropertyChanged(nameof(OutputFileCopyPath)); }
+        }
+
+        public string OutputFileHdrFormat
+        {
+            get => GetParam("HdrFormat", "");
+            set { SetParamOrRemoveIfEmpty("HdrFormat", value); OnPropertyChanged(nameof(OutputFileHdrFormat)); }
+        }
+
+        public string OutputFileAskForFilename
+        {
+            get => GetTriStateParam("AskForFilename");
+            set { SetTriStateParam("AskForFilename", value); OnPropertyChanged(nameof(OutputFileAskForFilename)); }
+        }
+
+        public string OutputFileJpegQuality
+        {
+            get => GetParam("JpegQuality", "");
+            set { SetParamOrRemoveIfEmpty("JpegQuality", value); OnPropertyChanged(nameof(OutputFileJpegQuality)); }
+        }
+
+        public string EditorMatchSizeToCapture
+        {
+            get => GetTriStateParam("MatchSizeToCapture");
+            set { SetTriStateParam("MatchSizeToCapture", value); OnPropertyChanged(nameof(EditorMatchSizeToCapture)); }
+        }
+
+        public string EditorTargetEditor
+        {
+            get => GetParam("TargetEditor", "");
+            set { SetParamOrRemoveIfEmpty("TargetEditor", value); OnPropertyChanged(nameof(EditorTargetEditor)); }
+        }
+
+        /// <summary>
+        /// Surface or ImageContainer, empty is the default (Surface). Used by the Editor and the Destinations step.
+        /// </summary>
+        public string EditorImportMode
+        {
+            get => GetParam("ImportMode", "");
+            set { SetParamOrRemoveIfEmpty("ImportMode", value); OnPropertyChanged(nameof(EditorImportMode)); }
+        }
+
+        public string PrinterName
+        {
+            get => GetParam("PrinterName", "");
+            set { SetParamOrRemoveIfEmpty("PrinterName", value); OnPropertyChanged(nameof(PrinterName)); }
+        }
+
+        public string ShowPrintOptions
+        {
+            get => GetTriStateParam("ShowPrintOptions");
+            set { SetTriStateParam("ShowPrintOptions", value); OnPropertyChanged(nameof(ShowPrintOptions)); }
+        }
+
+        public bool ShowPrinterDialog
+        {
+            get => Config.GetParameter<bool?>("ShowPrinterDialog") ?? false;
+            set
+            {
+                if (value) SetParam("ShowPrinterDialog", true);
+                else Config.Parameters?.Remove("ShowPrinterDialog");
+                NotifyConfigUpdated();
+                OnPropertyChanged(nameof(ShowPrinterDialog));
+            }
+        }
+
+        public string PrinterAllowRotate
+        {
+            get => GetTriStateParam("AllowRotate");
+            set { SetTriStateParam("AllowRotate", value); OnPropertyChanged(nameof(PrinterAllowRotate)); }
+        }
+
+        public string PrinterAllowEnlarge
+        {
+            get => GetTriStateParam("AllowEnlarge");
+            set { SetTriStateParam("AllowEnlarge", value); OnPropertyChanged(nameof(PrinterAllowEnlarge)); }
+        }
+
+        public string PrinterAllowShrink
+        {
+            get => GetTriStateParam("AllowShrink");
+            set { SetTriStateParam("AllowShrink", value); OnPropertyChanged(nameof(PrinterAllowShrink)); }
+        }
+
+        public string PrinterCenter
+        {
+            get => GetTriStateParam("Center");
+            set { SetTriStateParam("Center", value); OnPropertyChanged(nameof(PrinterCenter)); }
+        }
+
+        public string PrinterColorMode
+        {
+            get => GetParam("ColorMode", "");
+            set { SetParamOrRemoveIfEmpty("ColorMode", value); OnPropertyChanged(nameof(PrinterColorMode)); }
+        }
+
+        public string PrinterPrintFooter
+        {
+            get => GetTriStateParam("PrintFooter");
+            set { SetTriStateParam("PrintFooter", value); OnPropertyChanged(nameof(PrinterPrintFooter)); }
+        }
+
+        public string PrinterFooterPattern
+        {
+            get => GetParam("FooterPattern", "");
+            set { SetParamOrRemoveIfEmpty("FooterPattern", value); OnPropertyChanged(nameof(PrinterFooterPattern)); }
+        }
+
+        // --- 13. ExternalCommand Step ---
+        public string ExternalCommandLine
+        {
+            get => GetParam("Program", "");
+            set { SetParamOrRemoveIfEmpty("Program", value); OnPropertyChanged(nameof(ExternalCommandLine)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string ExternalCommandArguments
+        {
+            get => GetParam("Arguments", "");
+            set { SetParamOrRemoveIfEmpty("Arguments", value); OnPropertyChanged(nameof(ExternalCommandArguments)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string ExternalCommandFormat
+        {
+            get => GetParam("Format", "png");
+            set { SetParam("Format", value); OnPropertyChanged(nameof(ExternalCommandFormat)); }
+        }
+
+        public bool ExternalCommandRunInBackground
+        {
+            get => GetParamBool("RunInBackground", false);
+            set { SetParam("RunInBackground", value); OnPropertyChanged(nameof(ExternalCommandRunInBackground)); }
+        }
+
+        public string ExternalCommandWorkingDirectory
+        {
+            get => GetParam("WorkingDirectory", "");
+            set { SetParamOrRemoveIfEmpty("WorkingDirectory", value); OnPropertyChanged(nameof(ExternalCommandWorkingDirectory)); }
+        }
+
+        /// <summary>Name of a command configured in the External Command settings; its program, arguments and settings are the defaults.</summary>
+        public string ExternalCommandCommand
+        {
+            get => GetParam("Command", "");
+            set { SetParamOrRemoveIfEmpty("Command", value); OnPropertyChanged(nameof(ExternalCommandCommand)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        /// <summary>The file handed to the command: New, LastExport or None (empty: New)</summary>
+        public string ExternalCommandFile
+        {
+            get => GetParam("File", "");
+            set { SetParamOrRemoveIfEmpty("File", value); OnPropertyChanged(nameof(ExternalCommandFile)); }
+        }
+
+        /// <summary>What the command gets on standard input: None, Image or Text (empty: None)</summary>
+        public string ExternalCommandStandardInput
+        {
+            get => GetParam("StandardInput", "");
+            set
+            {
+                SetParamOrRemoveIfEmpty("StandardInput", value);
+                OnPropertyChanged(nameof(ExternalCommandStandardInput));
+                OnPropertyChanged(nameof(ExternalCommandHasStandardInputText));
+            }
+        }
+
+        public bool ExternalCommandHasStandardInputText => string.Equals(ExternalCommandStandardInput, "Text", StringComparison.OrdinalIgnoreCase);
+
+        public string ExternalCommandStandardInputText
+        {
+            get => GetParam("StandardInputText", "");
+            set { SetParamOrRemoveIfEmpty("StandardInputText", value); OnPropertyChanged(nameof(ExternalCommandStandardInputText)); }
+        }
+
+        /// <summary>What the standard output is: Text, Image, File or None (empty: Text)</summary>
+        public string ExternalCommandOutput
+        {
+            get => GetParam("Output", "");
+            set { SetParamOrRemoveIfEmpty("Output", value); OnPropertyChanged(nameof(ExternalCommandOutput)); }
+        }
+
+        /// <summary>The results are var.&lt;ResultName&gt;.*</summary>
+        public string ExternalCommandResultName
+        {
+            get => GetParam("ResultName", "");
+            set { SetParamOrRemoveIfEmpty("ResultName", value); OnPropertyChanged(nameof(ExternalCommandResultName)); }
+        }
+
+        /// <summary>None, Output or Url (empty: None, or the settings of a configured command)</summary>
+        public string ExternalCommandCopyToClipboard
+        {
+            get => GetParam("CopyToClipboard", "");
+            set { SetParamOrRemoveIfEmpty("CopyToClipboard", value); OnPropertyChanged(nameof(ExternalCommandCopyToClipboard)); }
+        }
+
+        public string ExternalCommandSuccessExitCodes
+        {
+            get => GetParam("SuccessExitCodes", "");
+            set { SetParamOrRemoveIfEmpty("SuccessExitCodes", value); OnPropertyChanged(nameof(ExternalCommandSuccessExitCodes)); }
+        }
+
+        public string ExternalCommandTimeout
+        {
+            get => GetParam("Timeout", "");
+            set { SetNumberParam("Timeout", value); OnPropertyChanged(nameof(ExternalCommandTimeout)); }
+        }
+
+        public string ExternalCommandEncoding
+        {
+            get => GetParam("Encoding", "");
+            set { SetParamOrRemoveIfEmpty("Encoding", value); OnPropertyChanged(nameof(ExternalCommandEncoding)); }
+        }
+
+        // --- 15. Jira Step ---
+        public string JiraIssueKey
+        {
+            get => GetParam("IssueKey", "");
+            set { SetParam("IssueKey", value); OnPropertyChanged(nameof(JiraIssueKey)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string JiraFormat
+        {
+            get => GetParam("Format", "png");
+            set { SetParam("Format", value); OnPropertyChanged(nameof(JiraFormat)); }
+        }
+
+        public string JiraJpegQuality
+        {
+            get => GetParam("JpegQuality", "80");
+            set { SetNumberParam("JpegQuality", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        // --- 16. Confluence Step ---
+        public string ConfluencePageId
+        {
+            get => GetParam("PageId", "");
+            set { SetParam("PageId", value); OnPropertyChanged(nameof(ConfluencePageId)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string ConfluenceFormat
+        {
+            get => GetParam("Format", "png");
+            set { SetParam("Format", value); OnPropertyChanged(nameof(ConfluenceFormat)); }
+        }
+
+        public string ConfluenceJpegQuality
+        {
+            get => GetParam("JpegQuality", "80");
+            set { SetNumberParam("JpegQuality", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        // --- 17. Office Step ---
+        public string OfficeApplication
+        {
+            get => GetParam("Application", "Word");
+            set { SetParam("Application", value); OnPropertyChanged(nameof(OfficeApplication)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        // --- PDF Step ---
+        public string PdfPageSize
+        {
+            get => GetParam("PageSize", "");
+            set { SetParamOrRemoveIfEmpty("PageSize", value); OnPropertyChanged(nameof(PdfPageSize)); }
+        }
+
+        public string PdfPageWidthMm
+        {
+            get => GetParam("PageWidthMm", "");
+            set { SetParamOrRemoveIfEmpty("PageWidthMm", value); OnPropertyChanged(nameof(PdfPageWidthMm)); }
+        }
+
+        public string PdfPageHeightMm
+        {
+            get => GetParam("PageHeightMm", "");
+            set { SetParamOrRemoveIfEmpty("PageHeightMm", value); OnPropertyChanged(nameof(PdfPageHeightMm)); }
+        }
+
+        public string PdfMarginTopMm
+        {
+            get => GetParam("MarginTopMm", "");
+            set { SetParamOrRemoveIfEmpty("MarginTopMm", value); OnPropertyChanged(nameof(PdfMarginTopMm)); }
+        }
+
+        public string PdfMarginBottomMm
+        {
+            get => GetParam("MarginBottomMm", "");
+            set { SetParamOrRemoveIfEmpty("MarginBottomMm", value); OnPropertyChanged(nameof(PdfMarginBottomMm)); }
+        }
+
+        public string PdfMarginLeftMm
+        {
+            get => GetParam("MarginLeftMm", "");
+            set { SetParamOrRemoveIfEmpty("MarginLeftMm", value); OnPropertyChanged(nameof(PdfMarginLeftMm)); }
+        }
+
+        public string PdfMarginRightMm
+        {
+            get => GetParam("MarginRightMm", "");
+            set { SetParamOrRemoveIfEmpty("MarginRightMm", value); OnPropertyChanged(nameof(PdfMarginRightMm)); }
+        }
+
+        public string PdfScalingMode
+        {
+            get => GetParam("ScalingMode", "");
+            set { SetParamOrRemoveIfEmpty("ScalingMode", value); OnPropertyChanged(nameof(PdfScalingMode)); }
+        }
+
+        public bool PdfShowSaveDialog
+        {
+            get => GetParamBool("ShowSaveDialog", true);
+            set { SetParam("ShowSaveDialog", value); OnPropertyChanged(nameof(PdfShowSaveDialog)); }
+        }
+
+        // --- Set Metadata Step ---
+        private static readonly string[] MetadataFieldNames = { "CaptureTime", "Author", "Source", "Text", "Barcodes" };
+
+        /// <summary>
+        /// The step has its own Fields, otherwise the fields of the settings are written
+        /// </summary>
+        public bool MetadataOwnFields
+        {
+            get => Config.Parameters?.ContainsKey("Fields") == true;
+            set
+            {
+                if (value == MetadataOwnFields) return;
+                if (value)
+                {
+                    SetParam("Fields", new List<string> { "CaptureTime" });
+                }
+                else
+                {
+                    Config.Parameters.Remove("Fields");
+                    NotifyConfigUpdated();
+                }
+                OnMetadataFieldsChanged();
+            }
+        }
+
+        public bool MetadataCaptureTime { get => HasMetadataField("CaptureTime"); set => SetMetadataField("CaptureTime", value); }
+        public bool MetadataAuthorField { get => HasMetadataField("Author"); set => SetMetadataField("Author", value); }
+        public bool MetadataSource { get => HasMetadataField("Source"); set => SetMetadataField("Source", value); }
+        public bool MetadataText { get => HasMetadataField("Text"); set => SetMetadataField("Text", value); }
+        public bool MetadataBarcodes { get => HasMetadataField("Barcodes"); set => SetMetadataField("Barcodes", value); }
+
+        private List<string> MetadataFields => Config?.GetParameter<List<string>>("Fields") ?? new List<string>();
+
+        private bool HasMetadataField(string name) => MetadataFields.Contains(name, StringComparer.Ordinal);
+
+        private void SetMetadataField(string name, bool value)
+        {
+            var fields = MetadataFields;
+            if (!MetadataOwnFields || HasMetadataField(name) == value) return;
+            fields = MetadataFieldNames.Where(field => field == name ? value : fields.Contains(field, StringComparer.Ordinal)).ToList();
+            SetParam("Fields", fields);
+            OnMetadataFieldsChanged();
+        }
+
+        private void OnMetadataFieldsChanged()
+        {
+            OnPropertyChanged(nameof(MetadataOwnFields));
+            OnPropertyChanged(nameof(MetadataCaptureTime));
+            OnPropertyChanged(nameof(MetadataAuthorField));
+            OnPropertyChanged(nameof(MetadataSource));
+            OnPropertyChanged(nameof(MetadataText));
+            OnPropertyChanged(nameof(MetadataBarcodes));
+            OnPropertyChanged(nameof(Summary));
+        }
+
+        public string MetadataTitle
+        {
+            get => GetParam("Title", "");
+            set { SetParamOrRemoveIfEmpty("Title", value); OnPropertyChanged(nameof(MetadataTitle)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string MetadataDescription
+        {
+            get => GetParam("Description", "");
+            set { SetParamOrRemoveIfEmpty("Description", value); OnPropertyChanged(nameof(MetadataDescription)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string MetadataAuthor
+        {
+            get => GetParam("Author", "");
+            set { SetParamOrRemoveIfEmpty("Author", value); OnPropertyChanged(nameof(MetadataAuthor)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string MetadataCopyright
+        {
+            get => GetParam("Copyright", "");
+            set { SetParamOrRemoveIfEmpty("Copyright", value); OnPropertyChanged(nameof(MetadataCopyright)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        private string MetadataSummary
+        {
+            get
+            {
+                var language = Texts.Get<IRecipeEditorLanguage>();
+                var parts = new List<string>();
+                if (MetadataOwnFields) parts.Add(MetadataFields.Count > 0 ? string.Join(", ", MetadataFields) : "-");
+                parts.AddRange(new[] { "Title", "Description", "Author", "Copyright" }.Where(key => Config.Parameters?.ContainsKey(key) == true));
+                return parts.Count > 0 ? string.Format(language.SummaryMetadata, string.Join(", ", parts)) : language.SummaryMetadataSettings;
+            }
+        }
+
+        // --- 18. Zxing Step ---
+        public string ZxingSetVariable
+        {
+            get => GetParam("OutputVariable", "barcode_text");
+            set { SetParam("OutputVariable", value); OnPropertyChanged(nameof(ZxingSetVariable)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public bool ZxingCopyToClipboard
+        {
+            get => GetParamBool("CopyToClipboard", true);
+            set { SetParam("CopyToClipboard", value); OnPropertyChanged(nameof(ZxingCopyToClipboard)); }
+        }
+
+        // --- 19. RecordVideo Step ---
+        public string VideoSourceType
+        {
+            get => GetParam("SourceType", "ActiveWindow");
+            set
+            {
+                SetParam("SourceType", value);
+                OnPropertyChanged(nameof(VideoSourceType));
+                OnPropertyChanged(nameof(IsVideoWindowSource));
+                OnPropertyChanged(nameof(IsVideoRegionSource));
+                OnPropertyChanged(nameof(IsVideoMonitorSource));
+                OnPropertyChanged(nameof(Summary));
+            }
+        }
+
+        public bool IsVideoWindowSource => string.Equals(VideoSourceType, "Window", StringComparison.OrdinalIgnoreCase) || string.Equals(VideoSourceType, "ActiveWindow", StringComparison.OrdinalIgnoreCase);
+        public bool IsVideoRegionSource => string.Equals(VideoSourceType, "Region", StringComparison.OrdinalIgnoreCase);
+        public bool IsVideoMonitorSource => string.Equals(VideoSourceType, "Monitor", StringComparison.OrdinalIgnoreCase);
+
+        public bool VideoUntilWindowCloses
+        {
+            get => GetParamBool("UntilWindowCloses", true);
+            set { SetParam("UntilWindowCloses", value); OnPropertyChanged(nameof(VideoUntilWindowCloses)); }
+        }
+
+        public string VideoDurationSeconds
+        {
+            get => GetParam("DurationSeconds", "0");
+            set { SetNumberParam("DurationSeconds", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string VideoOutputDirectory
+        {
+            get => GetParam("OutputDirectory", @"%USERPROFILE%\Videos\Greenshot");
+            set { SetParam("OutputDirectory", value); OnPropertyChanged(nameof(VideoOutputDirectory)); }
+        }
+
+        public string VideoFilenamePattern
+        {
+            get => GetParam("FilenamePattern", "Recording_{yyyyMMdd_HHmmss}.mp4");
+            set { SetParam("FilenamePattern", value); OnPropertyChanged(nameof(VideoFilenamePattern)); }
+        }
+
+        public string VideoPreset
+        {
+            get => GetParam("Preset", "Balanced");
+            set { SetParam("Preset", value); OnPropertyChanged(nameof(VideoPreset)); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string VideoFormat
+        {
+            get => GetParam("Format", "Mp4_H264");
+            set { SetParam("Format", value); OnPropertyChanged(nameof(VideoFormat)); }
+        }
+
+        public string VideoFrameRate
+        {
+            get => GetParam("FrameRate", "30");
+            set { SetNumberParam("FrameRate", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string VideoBitrate
+        {
+            get => GetParam("Bitrate", "2500000");
+            set { SetNumberParam("Bitrate", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string VideoTargetWidth
+        {
+            get => GetParam("TargetWidth", "0");
+            set { SetNumberParam("TargetWidth", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string VideoTargetHeight
+        {
+            get => GetParam("TargetHeight", "0");
+            set { SetNumberParam("TargetHeight", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string VideoScaleFactor
+        {
+            get => GetParam("ScaleFactor", "1.0");
+            set { SetParam("ScaleFactor", value); OnPropertyChanged(nameof(VideoScaleFactor)); }
+        }
+
+        public string VideoColorMode
+        {
+            get => GetParam("ColorMode", "FullColor");
+            set { SetParam("ColorMode", value); OnPropertyChanged(nameof(VideoColorMode)); }
+        }
+
+        public bool VideoCaptureCursor
+        {
+            get => GetParamBool("CaptureMouseCursor", true);
+            set
+            {
+                SetParam("CaptureMouseCursor", value);
+                OnPropertyChanged(nameof(VideoCaptureCursor));
+            }
+        }
+
+        public bool VideoShowCaptureBorder
+        {
+            get => GetParamBool("ShowCaptureBorder", false);
+            set { SetParam("ShowCaptureBorder", value); OnPropertyChanged(nameof(VideoShowCaptureBorder)); }
+        }
+
+        public string VideoResizeBehavior
+        {
+            get => GetParam("WindowResizeBehavior", "LetterboxFixedCanvas");
+            set { SetParam("WindowResizeBehavior", value); OnPropertyChanged(nameof(VideoResizeBehavior)); }
+        }
+
+        public string VideoAudioSource
+        {
+            get => GetParam("AudioSource", "None");
+            set { SetParam("AudioSource", value); OnPropertyChanged(nameof(VideoAudioSource)); }
+        }
+
+        public bool VideoPreventSleep
+        {
+            get => GetParamBool("PreventSleepWhileRecording", true);
+            set { SetParam("PreventSleepWhileRecording", value); OnPropertyChanged(nameof(VideoPreventSleep)); }
+        }
+
+        public bool VideoAutoPauseOnLock
+        {
+            get => GetParamBool("AutoPauseOnSessionLock", true);
+            set { SetParam("AutoPauseOnSessionLock", value); OnPropertyChanged(nameof(VideoAutoPauseOnLock)); }
+        }
+
+        public string VideoRegionX
+        {
+            get => GetParam("RegionX", "0");
+            set { SetNumberParam("RegionX", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string VideoRegionY
+        {
+            get => GetParam("RegionY", "0");
+            set { SetNumberParam("RegionY", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string VideoRegionWidth
+        {
+            get => GetParam("RegionWidth", "800");
+            set { SetNumberParam("RegionWidth", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string VideoRegionHeight
+        {
+            get => GetParam("RegionHeight", "600");
+            set { SetNumberParam("RegionHeight", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        public string VideoMonitorIndex
+        {
+            get => GetParam("MonitorIndex", "-1");
+            set { SetNumberParam("MonitorIndex", value); OnPropertyChanged(nameof(Summary)); }
+        }
+
+        private bool HasDestination(string dest)
+        {
+            if (Config.Parameters == null) return false;
+            var list = GetDestinationList();
+            return list.Contains(dest, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private void ToggleDestination(string dest, bool enabled)
+        {
+            var list = GetDestinationList();
+            if (enabled)
+            {
+                if (!list.Contains(dest, StringComparer.OrdinalIgnoreCase)) list.Add(dest);
+            }
+            else
+            {
+                list.RemoveAll(d => string.Equals(d, dest, StringComparison.OrdinalIgnoreCase));
+            }
+            SetParam("DestinationDesignations", list);
+            NotifyConfigUpdated();
+        }
+
+        private List<string> GetDestinationList()
+        {
+            var list = new List<string>();
+            if (Config.Parameters != null)
+            {
+                if (Config.Parameters.TryGetValue("DestinationDesignations", out var val) && val != null)
+                {
+                    if (val is IEnumerable<string> strEnum) list.AddRange(strEnum);
+                    else if (val is IEnumerable objEnum)
+                    {
+                        foreach (var item in objEnum) if (item != null) list.Add(item.ToString());
+                    }
+                }
+            }
+            return list;
+        }
+
+        #endregion
+
+        public string Summary
+        {
+            get
+            {
+                switch (StepType)
+                {
+                    case WellKnownStepTypes.Source:
+                        return string.Format(Texts.Get<IRecipeEditorLanguage>().SummarySource, SourceType);
+                    case WellKnownStepTypes.InteractiveSelection:
+                        return string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryMode, SelectionMode);
+                    case WellKnownStepTypes.Effect:
+                        if (IsBorderEffect) return string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryBorder, EffectBorderWidth, EffectBorderColor);
+                        if (IsDropShadowEffect) return string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryShadow, ShadowSize, ShadowDarkness);
+                        if (IsTornEdgeEffect) return string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryTornEdge, TornEdges);
+                        if (IsRotateEffect) return string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryRotate, RotateAngle);
+                        if (IsResizeEffect) return ResizePercentage != "0" && !string.IsNullOrEmpty(ResizePercentage) ? string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryResizePercent, ResizePercentage) : string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryResizeSize, ResizeWidth, ResizeHeight);
+                        if (IsResizeCanvasEffect) return string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryCanvasSides, CanvasLeft, CanvasTop, CanvasRight, CanvasBottom);
+                        if (IsMonochromeEffect) return string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryMonochrome, MonochromeThreshold);
+                        if (IsAdjustEffect) return string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryAdjust, AdjustBrightness, AdjustContrast, AdjustGamma);
+                        if (IsReduceColorsEffect) return string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryReduceColors, ReduceColorsCount);
+                        if (IsRemoveTransparencyEffect) return Texts.Get<IRecipeEditorLanguage>().SummaryRemoveTransparency;
+                        if (IsGrayscaleEffect) return Texts.Get<IRecipeEditorLanguage>().SummaryGrayscale;
+                        if (IsInvertEffect) return Texts.Get<IRecipeEditorLanguage>().SummaryInvert;
+                        return string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryEffect, EffectType);
+                    case WellKnownStepTypes.TextEffect:
+                        return string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryDlp, TextEffectAction);
+                    case WellKnownStepTypes.Annotation:
+                        return Annotations.Count > 0 ? string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryAnnotations, Annotations.Count, string.Join(", ", Annotations.Select(d => d.Type).Distinct())) : Texts.Get<IRecipeEditorLanguage>().SummaryAnnotationsNone;
+                    case WellKnownStepTypes.SetMetadata:
+                        return MetadataSummary;
+                    case WellKnownStepTypes.SetVariable:
+                        return Variables.Count > 0 ? string.Join(", ", Variables.Select(v => $"{v.Key}={v.Value}")) : Texts.Get<IRecipeEditorLanguage>().SummaryVariablesNone;
+                    case WellKnownStepTypes.ImmediateFeedback:
+                        return PlaySound ? Texts.Get<IRecipeEditorLanguage>().SummarySoundEnabled : Texts.Get<IRecipeEditorLanguage>().SummarySilent;
+                    case WellKnownStepTypes.SaveFile:
+                        return !string.IsNullOrWhiteSpace(SaveDirectory) ? string.Format(Texts.Get<IRecipeEditorLanguage>().SummarySaveTo, SaveDirectory) : Texts.Get<IRecipeEditorLanguage>().SummarySaveDefault;
+                    case WellKnownStepTypes.Clipboard:
+                        if (string.Equals(ClipboardMode, "TextOnly", StringComparison.OrdinalIgnoreCase)) return Texts.Get<IRecipeEditorLanguage>().SummaryClipboardOcrText;
+                        var fmtList = new List<string>();
+                        if (ClipboardFormatPNG) fmtList.Add("PNG");
+                        if (ClipboardFormatDIB) fmtList.Add("DIB");
+                        if (ClipboardFormatDIBV5) fmtList.Add("DIBv5");
+                        if (ClipboardFormatBitmap) fmtList.Add("Bitmap");
+                        if (ClipboardFormatHTML) fmtList.Add("HTML");
+                        if (ClipboardFormatHTMLDataUrl) fmtList.Add("DataURL");
+                        if (ClipboardFormatText || string.Equals(ClipboardMode, "ImageAndText", StringComparison.OrdinalIgnoreCase)) fmtList.Add("Text");
+                        return fmtList.Count > 0 ? string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryClipboard, string.Join(", ", fmtList)) : Texts.Get<IRecipeEditorLanguage>().SummaryCopyClipboard;
+                    case WellKnownStepTypes.Editor:
+                        return Texts.Get<IRecipeEditorLanguage>().SummaryEditor;
+                    case WellKnownStepTypes.Printer:
+                        return Texts.Get<IRecipeEditorLanguage>().SummaryPrinter;
+                    case WellKnownStepTypes.Email:
+                        return Texts.Get<IRecipeEditorLanguage>().SummaryEmail;
+                    case WellKnownStepTypes.CustomDestination:
+                        return !string.IsNullOrWhiteSpace(CustomDestinationId) ? string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryCustom, CustomDestinationId) : Texts.Get<IRecipeEditorLanguage>().SummaryCustomDestination;
+                    case WellKnownStepTypes.Destinations:
+                        var dests = GetDestinationList();
+                        return dests.Count > 0 ? string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryTo, string.Join(", ", dests)) : Texts.Get<IRecipeEditorLanguage>().SummaryExportTargets;
+                    case WellKnownStepTypes.DynamicDestination:
+                        string dDests = !string.IsNullOrWhiteSpace(DynamicDestinationSpecificDestinations) ? DynamicDestinationSpecificDestinations : Texts.Get<IRecipeEditorLanguage>().SummaryAllActive;
+                        string dTime = !IsUnset(DynamicDestinationTimeoutSeconds) ? $"{DynamicDestinationTimeoutSeconds}s" : Texts.Get<IRecipeEditorLanguage>().TriggerManual;
+                        return string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryDynamicDestination, dDests, dTime);
+                    case WellKnownStepTypes.Notification:
+                        return NotificationShow ? Texts.Get<IRecipeEditorLanguage>().SummaryNotificationShown : Texts.Get<IRecipeEditorLanguage>().SummaryNotificationHidden;
+                    case RecipeEditorViewModel.InNodeId:
+                        return Texts.Get<IRecipeEditorLanguage>().SummaryIn;
+                    case RecipeExtension.OutNode:
+                        return Texts.Get<IRecipeEditorLanguage>().SummaryOut;
+                    case WellKnownStepTypes.Slot:
+                        return string.Equals(SlotAccept, SlotAcceptAll, StringComparison.OrdinalIgnoreCase)
+                            ? string.Format(Texts.Get<IRecipeEditorLanguage>().SummarySlotAll, SlotName)
+                            : string.Format(Texts.Get<IRecipeEditorLanguage>().SummarySlotAccepts, SlotName, SlotAccept);
+                    case WellKnownStepTypes.Stdout:
+                        return !string.IsNullOrWhiteSpace(OutputText) ? $"Stdout: {OutputText}" : "Stdout";
+                    case WellKnownStepTypes.ShowInExplorer:
+                        return string.IsNullOrWhiteSpace(ShowInExplorerPath)
+                            ? Texts.Get<IRecipeEditorLanguage>().SummaryShowInExplorerLast
+                            : string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryShowInExplorer, ShowInExplorerPath);
+                    case WellKnownStepTypes.OpenWindow:
+                        return string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryOpenWindow, OpenWindowWindow);
+                    case WellKnownStepTypes.Delay:
+                        return string.Format(DelayAskUser ? Texts.Get<IRecipeEditorLanguage>().SummaryDelayAsk : Texts.Get<IRecipeEditorLanguage>().SummaryDelay, DelaySeconds);
+                    case WellKnownStepTypes.Stderr:
+                        return string.Format(StderrAbort ? Texts.Get<IRecipeEditorLanguage>().SummaryStderrAbort : Texts.Get<IRecipeEditorLanguage>().SummaryStderr, StderrExitCode, OutputText);
+                    case WellKnownStepTypes.Conditional:
+                        return string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryBranches, ConditionBranches.Count);
+                    case WellKnownStepTypes.UserPrompt:
+                        return PromptChoices.Count > 0 ? string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryPrompt, string.Join(", ", PromptChoices.Select(c => c.Label))) : Texts.Get<IRecipeEditorLanguage>().SummaryPromptNone;
+                    case WellKnownStepTypes.Ocr:
+                        return Texts.Get<IRecipeEditorLanguage>().SummaryOcr;
+                    case WellKnownStepTypes.RecordVideo:
+                        string recTarget = GetParam("SourceType", "ActiveWindow");
+                        string recFps = GetParam("FrameRate", "30");
+                        string recPreset = GetParam("Preset", "Balanced");
+                        return string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryRecordVideo, recTarget, recFps, recPreset);
+                    case var _ when IsExternalCommand:
+                        return !string.IsNullOrWhiteSpace(ExternalCommandLine) ? string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryRun, System.IO.Path.GetFileName(ExternalCommandLine), ExternalCommandArguments).Trim() : Texts.Get<IRecipeEditorLanguage>().SummaryExecuteCommand;
+                    case var _ when IsJira:
+                        return !string.IsNullOrWhiteSpace(JiraIssueKey) ? string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryJira, JiraIssueKey) : Texts.Get<IRecipeEditorLanguage>().SummaryJiraNone;
+                    case var _ when IsConfluence:
+                        return !string.IsNullOrWhiteSpace(ConfluencePageId) ? string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryConfluence, ConfluencePageId) : Texts.Get<IRecipeEditorLanguage>().SummaryConfluenceNone;
+                    case var _ when IsOffice:
+                        return string.Format(Texts.Get<IRecipeEditorLanguage>().SummaryOffice, OfficeApplication);
+                    case var _ when IsZxing:
+                        return Texts.Get<IRecipeEditorLanguage>().SummaryBarcode;
+                    case var _ when IsBox:
+                        return Texts.Get<IRecipeEditorLanguage>().SummaryBox;
+                    case var _ when IsDropbox:
+                        return Texts.Get<IRecipeEditorLanguage>().SummaryDropbox;
+                    default:
+                        return StepType;
+                }
+            }
+        }
+
+        public void NotifyConfigUpdated()
+        {
+            if (IsConditional)
+            {
+                LoadConditionBranches();
+            }
+            else if (IsUserPrompt)
+            {
+                LoadPromptChoices();
+            }
+            OnPropertyChanged(nameof(Summary));
+            OnPropertyChanged(nameof(DisplayName));
+            OnPropertyChanged(nameof(Name));
+            OnPropertyChanged(nameof(IsExternalCommand));
+            OnPropertyChanged(nameof(IsJira));
+            OnPropertyChanged(nameof(IsConfluence));
+            OnPropertyChanged(nameof(IsOffice));
+            OnPropertyChanged(nameof(IsZxing));
+            OnPropertyChanged(nameof(IsBox));
+            OnPropertyChanged(nameof(IsDropbox));
+            OnPropertyChanged(nameof(IsCloudStorage));
+            OnPropertyChanged(nameof(SourceType));
+            OnPropertyChanged(nameof(IsWindowSource));
+            OnPropertyChanged(nameof(WindowTitlePattern));
+            OnPropertyChanged(nameof(ProcessName));
+            OnPropertyChanged(nameof(CaptureMouseCursorMode));
+            OnPropertyChanged(nameof(DelayMs));
+            OnPropertyChanged(nameof(SelectionMode));
+            OnPropertyChanged(nameof(EffectType));
+            OnPropertyChanged(nameof(IsDropShadowEffect));
+            OnPropertyChanged(nameof(IsBorderEffect));
+            OnPropertyChanged(nameof(ShadowSize));
+            OnPropertyChanged(nameof(ShadowDarkness));
+            OnPropertyChanged(nameof(TextEffectAction));
+            OnPropertyChanged(nameof(TextEffectFillColor));
+            OnPropertyChanged(nameof(TextEffectPatterns));
+            OnPropertyChanged(nameof(ConditionBranches));
+            OnPropertyChanged(nameof(PromptChoices));
+            OnPropertyChanged(nameof(UserPromptTitle));
+            OnPropertyChanged(nameof(UserPromptMessage));
+            OnPropertyChanged(nameof(UserPromptShowPreview));
+            OnPropertyChanged(nameof(UserPromptTimeoutSeconds));
+            OnPropertyChanged(nameof(PlaySound));
+            OnPropertyChanged(nameof(SoundFilePath));
+            OnPropertyChanged(nameof(ScreenCaptureMode));
+            OnPropertyChanged(nameof(AlignDpiMode));
+            OnPropertyChanged(nameof(SourceScreenMode));
+            OnPropertyChanged(nameof(SourceHdr));
+            OnPropertyChanged(nameof(AllowWindowSnappingMode));
+            OnPropertyChanged(nameof(OutputFileFormat));
+            OnPropertyChanged(nameof(OutputFilePromptQuality));
+            OnPropertyChanged(nameof(OutputFileIfExists));
+            OnPropertyChanged(nameof(OutputFileCopyPath));
+            OnPropertyChanged(nameof(OutputFileHdrFormat));
+            OnPropertyChanged(nameof(OutputFileAskForFilename));
+            OnPropertyChanged(nameof(OutputFileJpegQuality));
+            OnPropertyChanged(nameof(EditorMatchSizeToCapture));
+            OnPropertyChanged(nameof(EditorTargetEditor));
+            OnPropertyChanged(nameof(EditorImportMode));
+            OnPropertyChanged(nameof(PrinterName));
+            OnPropertyChanged(nameof(ShowPrintOptions));
+            OnPropertyChanged(nameof(ShowPrinterDialog));
+            OnPropertyChanged(nameof(PrinterAllowRotate));
+            OnPropertyChanged(nameof(PrinterAllowEnlarge));
+            OnPropertyChanged(nameof(PrinterAllowShrink));
+            OnPropertyChanged(nameof(PrinterCenter));
+            OnPropertyChanged(nameof(PrinterColorMode));
+            OnPropertyChanged(nameof(PrinterPrintFooter));
+            OnPropertyChanged(nameof(PrinterFooterPattern));
+            OnPropertyChanged(nameof(PdfPageSize));
+            OnPropertyChanged(nameof(PdfPageWidthMm));
+            OnPropertyChanged(nameof(PdfPageHeightMm));
+            OnPropertyChanged(nameof(PdfMarginTopMm));
+            OnPropertyChanged(nameof(PdfMarginBottomMm));
+            OnPropertyChanged(nameof(PdfMarginLeftMm));
+            OnPropertyChanged(nameof(PdfMarginRightMm));
+            OnPropertyChanged(nameof(PdfScalingMode));
+            OnPropertyChanged(nameof(PdfShowSaveDialog));
+            OnPropertyChanged(nameof(ExternalCommandLine));
+            OnPropertyChanged(nameof(ExternalCommandArguments));
+            OnPropertyChanged(nameof(ExternalCommandFormat));
+            OnPropertyChanged(nameof(ExternalCommandRunInBackground));
+            OnPropertyChanged(nameof(ExternalCommandWorkingDirectory));
+            OnPropertyChanged(nameof(ExternalCommandFile));
+            OnPropertyChanged(nameof(ExternalCommandStandardInput));
+            OnPropertyChanged(nameof(ExternalCommandHasStandardInputText));
+            OnPropertyChanged(nameof(ExternalCommandStandardInputText));
+            OnPropertyChanged(nameof(ExternalCommandOutput));
+            OnPropertyChanged(nameof(ExternalCommandResultName));
+            OnPropertyChanged(nameof(ExternalCommandCopyToClipboard));
+            OnPropertyChanged(nameof(ExternalCommandSuccessExitCodes));
+            OnPropertyChanged(nameof(ExternalCommandTimeout));
+            OnPropertyChanged(nameof(ExternalCommandEncoding));
+            OnPropertyChanged(nameof(JiraIssueKey));
+            OnPropertyChanged(nameof(JiraFormat));
+            OnPropertyChanged(nameof(JiraJpegQuality));
+            OnPropertyChanged(nameof(ConfluencePageId));
+            OnPropertyChanged(nameof(ConfluenceFormat));
+            OnPropertyChanged(nameof(ConfluenceJpegQuality));
+            OnPropertyChanged(nameof(OfficeApplication));
+            OnPropertyChanged(nameof(ZxingSetVariable));
+            OnPropertyChanged(nameof(ZxingCopyToClipboard));
+            OnMetadataFieldsChanged();
+            OnPropertyChanged(nameof(MetadataTitle));
+            OnPropertyChanged(nameof(MetadataDescription));
+            OnPropertyChanged(nameof(MetadataAuthor));
+            OnPropertyChanged(nameof(MetadataCopyright));
+            OnPropertyChanged(nameof(NotificationShow));
+            OnPropertyChanged(nameof(OutputText));
+            OnPropertyChanged(nameof(ShowInExplorerPath));
+            OnPropertyChanged(nameof(OpenWindowWindow));
+            OnPropertyChanged(nameof(DelaySeconds));
+            OnPropertyChanged(nameof(DelayAskUser));
+            OnPropertyChanged(nameof(DelayShowCountdown));
+            OnPropertyChanged(nameof(StderrExitCode));
+            OnPropertyChanged(nameof(StderrAbort));
+            OnPropertyChanged(nameof(IsFileSource));
+            OnPropertyChanged(nameof(SourceFilename));
+            OnPropertyChanged(nameof(WindowMatchCase));
+            OnPropertyChanged(nameof(ExternalCommandCommand));
+            OnPropertyChanged(nameof(PlaySound));
+            OnPropertyChanged(nameof(DestinationEditor));
+            OnPropertyChanged(nameof(DestinationClipboard));
+            OnPropertyChanged(nameof(DestinationFile));
+            OnPropertyChanged(nameof(DestinationPrinter));
+            OnPropertyChanged(nameof(DestinationEmail));
+            OnPropertyChanged(nameof(SaveDirectory));
+            OnPropertyChanged(nameof(FilenamePattern));
+            OnPropertyChanged(nameof(ImageFormat));
+            OnPropertyChanged(nameof(CustomDestinationsText));
+            OnPropertyChanged(nameof(CustomDestinationId));
+            OnPropertyChanged(nameof(ClipboardMode));
+            OnPropertyChanged(nameof(IsClipboardTextEnabled));
+            OnPropertyChanged(nameof(ClipboardFormatPNG));
+            OnPropertyChanged(nameof(ClipboardFormatDIB));
+            OnPropertyChanged(nameof(ClipboardFormatDIBV5));
+            OnPropertyChanged(nameof(ClipboardFormatBitmap));
+            OnPropertyChanged(nameof(ClipboardFormatHTML));
+            OnPropertyChanged(nameof(ClipboardFormatHTMLDataUrl));
+            OnPropertyChanged(nameof(ClipboardFormatText));
+            OnPropertyChanged(nameof(ClipboardCustomText));
+            OnPropertyChanged(nameof(VideoSourceType));
+            OnPropertyChanged(nameof(IsVideoWindowSource));
+            OnPropertyChanged(nameof(IsVideoRegionSource));
+            OnPropertyChanged(nameof(IsVideoMonitorSource));
+            OnPropertyChanged(nameof(VideoUntilWindowCloses));
+            OnPropertyChanged(nameof(VideoDurationSeconds));
+            OnPropertyChanged(nameof(VideoOutputDirectory));
+            OnPropertyChanged(nameof(VideoFilenamePattern));
+            OnPropertyChanged(nameof(VideoPreset));
+            OnPropertyChanged(nameof(VideoFormat));
+            OnPropertyChanged(nameof(VideoFrameRate));
+            OnPropertyChanged(nameof(VideoBitrate));
+            OnPropertyChanged(nameof(VideoTargetWidth));
+            OnPropertyChanged(nameof(VideoTargetHeight));
+            OnPropertyChanged(nameof(VideoScaleFactor));
+            OnPropertyChanged(nameof(VideoColorMode));
+            OnPropertyChanged(nameof(VideoCaptureCursor));
+            OnPropertyChanged(nameof(VideoShowCaptureBorder));
+            OnPropertyChanged(nameof(VideoResizeBehavior));
+            OnPropertyChanged(nameof(VideoAudioSource));
+            OnPropertyChanged(nameof(VideoPreventSleep));
+            OnPropertyChanged(nameof(VideoAutoPauseOnLock));
+            OnPropertyChanged(nameof(VideoRegionX));
+            OnPropertyChanged(nameof(VideoRegionY));
+            OnPropertyChanged(nameof(VideoRegionWidth));
+            OnPropertyChanged(nameof(VideoRegionHeight));
+            OnPropertyChanged(nameof(VideoMonitorIndex));
+            OnPropertyChanged(nameof(DynamicDestinationTitle));
+            OnPropertyChanged(nameof(DynamicDestinationShowPreview));
+            OnPropertyChanged(nameof(DynamicDestinationTimeoutSeconds));
+            OnPropertyChanged(nameof(DynamicDestinationSpecificDestinations));
+            OnPropertyChanged(nameof(OnErrorAction));
+            OnPropertyChanged(nameof(OnErrorNodeId));
+            OnPropertyChanged(nameof(OnErrorRecipeId));
+            OnPropertyChanged(nameof(AvailableTargetSteps));
+            OnPropertyChanged(nameof(AvailableTargetRecipes));
+        }
+
+        public string GetParam(string key, string fallback = "")
+        {
+            if (Config?.Parameters != null)
+            {
+                foreach (var kvp in Config.Parameters)
+                {
+                    if (string.Equals(kvp.Key, key, StringComparison.OrdinalIgnoreCase) && kvp.Value != null)
+                    {
+                        // 0.6 stays 0.6 in a German Windows too: the field writes it back as it shows it
+                        return Convert.ToString(kvp.Value, CultureInfo.InvariantCulture);
+                    }
+                }
+            }
+            return fallback;
+        }
+
+        public bool GetParamBool(string key, bool fallback = false)
+        {
+            if (Config?.Parameters != null)
+            {
+                foreach (var kvp in Config.Parameters)
+                {
+                    if (string.Equals(kvp.Key, key, StringComparison.OrdinalIgnoreCase) && kvp.Value != null)
+                    {
+                        if (kvp.Value is bool b) return b;
+                        if (bool.TryParse(kvp.Value.ToString(), out bool pb)) return pb;
+                    }
+                }
+            }
+            return fallback;
+        }
+
+        public void SetParam(string key, object value)
+        {
+            if (Config.Parameters == null)
+            {
+                Config.Parameters = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            }
+            // The text of an input field in the type the step declares: "5" is saved as 5
+            var declared = value is string ? StepRegistry.Instance.GetContract(Config.StepType)?.FindParameter(key) : null;
+            Config.Parameters[key] = declared != null ? RecipeParameterTypes.FromText((string)value, declared.DataType) : value;
+            NotifyConfigUpdated();
+        }
+
+        public string GetTriStateParam(string key)
+        {
+            if (Config.Parameters != null && Config.Parameters.TryGetValue(key, out var val) && val != null)
+            {
+                if (val is bool b) return b ? "true" : "false";
+                if (bool.TryParse(val.ToString(), out bool pb)) return pb ? "true" : "false";
+            }
+            return "";
+        }
+
+        public void SetTriStateParam(string key, string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                Config.Parameters?.Remove(key);
+            }
+            else
+            {
+                SetParam(key, value == "true");
+            }
+            NotifyConfigUpdated();
+        }
+
+        /// <summary>
+        /// The text of a number field: a number in the type the step declares, an expression as text, empty removes it (the field then
+        /// shows the default). It doesn't notify the field, which would put the default in while the value is typed again.
+        /// </summary>
+        private void SetNumberParam(string key, string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                Config.Parameters?.Remove(key);
+                return;
+            }
+            if (Config.Parameters == null)
+            {
+                Config.Parameters = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            }
+            var declared = StepRegistry.Instance.GetContract(Config.StepType)?.FindParameter(key);
+            Config.Parameters[key] = declared != null ? RecipeParameterTypes.FromText(value.Trim(), declared.DataType) : value.Trim();
+        }
+
+        public void SetParamOrRemoveIfEmpty(string key, string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                Config.Parameters?.Remove(key);
+            }
+            else
+            {
+                SetParam(key, value.Trim());
+            }
+            NotifyConfigUpdated();
+        }
+    }
+}

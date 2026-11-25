@@ -1,13 +1,13 @@
 ﻿/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -19,19 +19,35 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Dapplo.Ini.Converters;
+using System.Linq;
 using Greenshot.Base.Core;
+using Greenshot.Base.Core.FileFormat;
 using Greenshot.Base.Interfaces;
+using Greenshot.Editor.Configuration;
 using Greenshot.Editor.FileFormatHandlers;
 
 namespace Greenshot.Editor
 {
     public static class EditorInitialize
     {
+        /// <summary>
+        /// Register the value converters the editor configuration needs, this must happen before greenshot.ini is loaded,
+        /// otherwise e.g. the last used field values can't be read.
+        /// </summary>
+        public static void RegisterValueConverters()
+        {
+            ValueConverterRegistry.Register(new GreenshotEditorObjectValueConverter());
+        }
+
         public static void Initialize()
         {
+            // Registering again is harmless, this keeps hosts which only call Initialize (tests) working
+            RegisterValueConverters();
+
             SimpleServiceProvider.Current.AddService<IFileFormatHandler>(
-                    // All generic things, like gif, png, jpg etc.
-                    new DefaultFileFormatHandler(),
+                    // Saves gif, png, jpg etc., loads what WIC can't (tga, pbm, webp without the Store codec)
+                    new ImageSharpFileFormatHandler(),
                     // Greenshot format
                     new GreenshotFileFormatHandler(),
                     // For .svg support
@@ -42,9 +58,25 @@ namespace Greenshot.Editor
                     new IconFileFormatHandler(),
                     // EMF & WMF
                     new MetaFileFormatHandler(),
-                    // JPG XR
-                    new WpfFileFormatHandler()
+                    // JPEG XR and everything else WIC can decode
+                    new WicFileFormatHandler()
                 );
+
+            // Writing and reading HDR files (JPEG XR of an HDR capture), registered once: they are looked up with GetInstance
+            if (SimpleServiceProvider.Current.GetAllInstances<IHdrImageEncoder>().Count == 0)
+            {
+                SimpleServiceProvider.Current.AddService<IHdrImageEncoder>(new WicHdrImageEncoder());
+            }
+            if (SimpleServiceProvider.Current.GetAllInstances<IHdrImageDecoder>().Count == 0)
+            {
+                SimpleServiceProvider.Current.AddService<IHdrImageDecoder>(new WicHdrImageDecoder());
+            }
+
+            IFileFormatRegistry registry = SimpleServiceProvider.Current.GetInstance<IFileFormatRegistry>();
+            foreach (var handler in SimpleServiceProvider.Current.GetAllInstances<IFileFormatHandler>().OfType<AbstractFileFormatHandler>())
+            {
+                handler.RegisterFileFormats(registry);
+            }
         }
     }
 }

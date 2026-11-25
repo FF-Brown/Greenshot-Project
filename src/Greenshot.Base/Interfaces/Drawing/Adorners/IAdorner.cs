@@ -1,13 +1,13 @@
 ﻿/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -49,10 +49,10 @@ namespace Greenshot.Base.Interfaces.Drawing.Adorners
         IDrawableContainer Owner { get; }
 
         /// <summary>
-        /// Is the current point "over" the Adorner?
-        /// If this is the case, the
+        /// Is the point "over" the Adorner? The adorner is drawn in screen pixels, whatever the zoom, so the point is in surface
+        /// (client) coordinates, not in image coordinates.
         /// </summary>
-        /// <param name="point">Point to test</param>
+        /// <param name="point">Point to test, in surface coordinates</param>
         /// <returns>true if so</returns>
         bool HitTest(NativePoint point);
 

@@ -1,13 +1,13 @@
 ﻿/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2020 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  *
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
@@ -21,7 +21,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Drawing;
 
 namespace Greenshot.Base.Core.OAuth
 {
@@ -46,11 +45,6 @@ namespace Greenshot.Base.Core.OAuth
         /// Specify the name of the cloud service, so it can be used in window titles, logs etc
         /// </summary>
         public string CloudServiceName { get; set; }
-
-        /// <summary>
-        /// Specify the size of the embedded Browser, if using this
-        /// </summary>
-        public Size BrowserSize { get; set; }
 
         /// <summary>
         /// The OAuth 2 client id

@@ -1,13 +1,13 @@
 ﻿/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -32,9 +32,27 @@ namespace Greenshot.Base.Interfaces
     /// </summary>
     public enum FileFormatHandlerActions
     {
+        /// <summary>
+        /// The FileFormatHandler supports the following extensions to save to stream
+        /// </summary>
         SaveToStream,
+        /// <summary>
+        /// The FileFormatHandler supports the following extensions to load from stream
+        /// </summary>
         LoadFromStream,
-        LoadDrawableFromStream
+        /// <summary>
+        /// The FileFormatHandler supports the following extensions to load from stream
+        /// </summary>
+        LoadDrawableFromStream,
+        /// <summary>
+        /// Specifies which file extensions are supported for loading from file, this is used for the open file dialog
+        /// </summary>
+        LoadFromFile,
+        /// <summary>
+        /// Specifies which file extensions are supported for saving to file, this is used for the save file dialog
+        /// </summary>
+        SaveToFile
+
     }
 
     /// <summary>
@@ -84,5 +102,12 @@ namespace Greenshot.Base.Interfaces
         /// <param name="parentSurface">ISurface</param>
         /// <returns>IEnumerable{IDrawableContainer}</returns>
         public IEnumerable<IDrawableContainer> LoadDrawablesFromStream(Stream stream, string extension, ISurface parentSurface = null);
+
+        /// <summary>
+        /// Allow a FileFormatHandler to load a surface from a stream, this is used for the .greenshot file format
+        /// </summary>
+        /// <param name="surfaceFileStream"></param>
+        /// <returns>ISurface</returns>
+        public ISurface LoadSurface(Stream surfaceFileStream);
     }
 }

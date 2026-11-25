@@ -1,13 +1,13 @@
-﻿/*
+/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -21,15 +21,15 @@
 
 using System.Collections.Generic;
 using Greenshot.Base.Core;
-using Greenshot.Base.Core.Enums;
 using Greenshot.Base.Effects;
-using Greenshot.Base.IniFile;
+using Dapplo.Ini;
+using Greenshot.Base.Core.FileFormat;
 
 namespace Greenshot.Base.Interfaces.Plugin
 {
     public class SurfaceOutputSettings
     {
-        private static readonly CoreConfiguration CoreConfig = IniConfig.GetIniSection<CoreConfiguration>();
+        private static readonly ICoreConfiguration CoreConfig = IniConfigRegistry.GetSection<ICoreConfiguration>();
         private bool _reduceColors;
         private bool _disableReduceColors;
 
@@ -39,19 +39,20 @@ namespace Greenshot.Base.Interfaces.Plugin
             Format = CoreConfig.OutputFileFormat;
             JPGQuality = CoreConfig.OutputFileJpegQuality;
             ReduceColors = CoreConfig.OutputFileReduceColors;
+            PngCompressionLevel = CoreConfig.OutputFilePngCompressionLevel;
         }
 
-        public SurfaceOutputSettings(OutputFormat format) : this()
+        public SurfaceOutputSettings(string format) : this()
         {
             Format = format;
         }
 
-        public SurfaceOutputSettings(OutputFormat format, int quality) : this(format)
+        public SurfaceOutputSettings(string format, int quality) : this(format)
         {
             JPGQuality = quality;
         }
 
-        public SurfaceOutputSettings(OutputFormat format, int quality, bool reduceColors) : this(format, quality)
+        public SurfaceOutputSettings(string format, int quality, bool reduceColors) : this(format, quality)
         {
             ReduceColors = reduceColors;
         }
@@ -62,20 +63,37 @@ namespace Greenshot.Base.Interfaces.Plugin
         /// <returns>this for fluent API usage</returns>
         public SurfaceOutputSettings PreventGreenshotFormat()
         {
-            // If OutputFormat is Greenshot, use PNG instead.
-            if (Format == OutputFormat.greenshot)
+            // If Format is Greenshot, use PNG instead.
+            if (WellKnownFileFormats.IsEqualFormat(WellKnownFileFormats.Greenshot, Format))
             {
-                Format = OutputFormat.png;
+                Format = WellKnownFileFormats.Png;
             }
 
             return this;
         }
 
-        public OutputFormat Format { get; set; }
+        public string Format { get; set; }
+
+        /// <summary>
+        /// An optional discriminator for encoded-image cache entries when output depends on settings not otherwise represented here.
+        /// Use the same key for equivalent output settings and different keys when they can produce different encoded data.
+        /// </summary>
+        public string EncodingCacheKey { get; set; }
 
         public int JPGQuality { get; set; }
 
+        /// <summary>
+        /// True to write the private details of ExportMetadata (window title, web address, text, barcodes) into the image:
+        /// set for files saved on this computer, and for a destination when the user chose to keep them
+        /// </summary>
+        public bool IncludePrivateMetadata { get; set; }
+
         public bool SaveBackgroundOnly { get; set; }
+
+        /// <summary>
+        /// zlib compression level (1-9) for PNG
+        /// </summary>
+        public int PngCompressionLevel { get; set; }
 
         public List<IEffect> Effects { get; } = new List<IEffect>();
 
@@ -83,8 +101,8 @@ namespace Greenshot.Base.Interfaces.Plugin
         {
             get
             {
-                // Fix for Bug #3468436, force quantizing when output format is gif as this has only 256 colors!
-                if (OutputFormat.gif.Equals(Format))
+                // Fix for Bug #3468436, force quantizing when file format is gif as this has only 256 colors!
+                if (WellKnownFileFormats.IsEqualFormat(WellKnownFileFormats.Gif, Format))
                 {
                     return true;
                 }
@@ -102,8 +120,8 @@ namespace Greenshot.Base.Interfaces.Plugin
             get { return _disableReduceColors; }
             set
             {
-                // Quantizing os needed when output format is gif as this has only 256 colors!
-                if (!OutputFormat.gif.Equals(Format))
+                // Quantizing is needed when file format is gif as this has only 256 colors!
+                if (!WellKnownFileFormats.IsEqualFormat(WellKnownFileFormats.Gif, Format))
                 {
                     _disableReduceColors = value;
                 }

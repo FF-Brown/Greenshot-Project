@@ -1,0 +1,346 @@
+/*
+ * Greenshot - a free and open source screenshot tool
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
+ * 
+ * For more information see: https://getgreenshot.org/
+ * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+using System;
+using System.IO;
+using System.IO.Pipes;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Threading;
+using System.Threading.Tasks;
+using Greenshot.Base.Core;
+using Greenshot.Base.Serialization;
+using log4net;
+#if !GREENSHOT_LIGHT
+using Greenshot.Ai;
+#endif
+
+namespace Greenshot.Ipc
+{
+    /// <summary>
+    /// Encapsulates an incoming IPC request and provides bidirectional response capability on the connected stream.
+    /// </summary>
+    /// <remarks>
+    /// Handlers always reply with JSON-shaped objects: streaming chunks <c>{stream, text}</c> and one final reply
+    /// <c>{status, exit_code, stdout, stderr, ...}</c>. For connections that announced <c>reply_format: "text"</c> in their HELLO
+    /// (greenshot-cli.exe / greenshot-proxy.exe) these are translated to text frames, so the executables never parse JSON:
+    /// <c>'O' + UTF-8</c> (stdout), <c>'E' + UTF-8</c> (stderr) and <c>'X' + int32 exit code</c> (end of the reply).
+    /// With <c>--json</c> the final reply object itself is sent as stdout text.
+    /// </remarks>
+    public class IpcRequestContext
+    {
+        private static readonly ILog Log = LogManager.GetLogger(typeof(IpcRequestContext));
+
+        public const byte TextFrameStdout = (byte)'O';
+        public const byte TextFrameStderr = (byte)'E';
+        public const byte TextFrameExit = (byte)'X';
+
+        /// <summary>
+        /// Shared by a request and the contexts derived from it (see <see cref="WithEnvelope"/>), so the final reply is sent only once.
+        /// </summary>
+        private sealed class ReplyState
+        {
+            public bool Completed;
+
+            /// <summary>
+            /// The client closed the connection without reading the reply, nothing more is written
+            /// </summary>
+            public bool ClientGone;
+        }
+
+        private readonly SemaphoreSlim _writeLock;
+        private readonly ReplyState _replyState;
+
+        public IpcEnvelope Envelope { get; }
+        public Stream Stream { get; }
+
+        /// <summary>
+        /// Origin of the calling browser extension, as announced in the connection's HELLO frame (native messaging only).
+        /// </summary>
+        public string ConnectionOrigin { get; set; }
+
+#if !GREENSHOT_LIGHT
+        /// <summary>
+        /// Source "mcp" only: the program which uses Greenshot through greenshot-mcp.exe, as identified by Greenshot (see <see cref="AiToolCaller"/>).
+        /// </summary>
+        public AiToolClient AiClient { get; set; }
+#endif
+
+        /// <summary>
+        /// True when the connection announced text replies (terminal / shell) instead of JSON.
+        /// </summary>
+        public bool UsesTextFrames { get; set; }
+
+        /// <summary>
+        /// True once the final reply (text mode: the exit frame) has been sent.
+        /// </summary>
+        public bool IsReplyCompleted => _replyState.Completed;
+
+        /// <summary>
+        /// Default for <see cref="WriteTimeout"/>: generous, as a console can pause output (e.g. while selecting text).
+        /// </summary>
+        public static readonly TimeSpan DefaultWriteTimeout = TimeSpan.FromMinutes(2);
+
+        /// <summary>
+        /// How long a frame may take to be read by the client, before the connection is closed.
+        /// </summary>
+        public TimeSpan WriteTimeout { get; set; } = DefaultWriteTimeout;
+
+        public IpcRequestContext(IpcEnvelope envelope, Stream stream, SemaphoreSlim connectionWriteLock = null)
+            : this(envelope, stream, connectionWriteLock ?? new SemaphoreSlim(1, 1), new ReplyState())
+        {
+        }
+
+        private IpcRequestContext(IpcEnvelope envelope, Stream stream, SemaphoreSlim writeLock, ReplyState replyState)
+        {
+            Envelope = envelope ?? throw new ArgumentNullException(nameof(envelope));
+            Stream = stream ?? throw new ArgumentNullException(nameof(stream));
+            // Serializes writes to the connection: streamed stdout/stderr frames can be emitted concurrently from parallel DAG
+            // branches, and a length prefix + body must never interleave with another frame.
+            _writeLock = writeLock;
+            _replyState = replyState;
+        }
+
+        /// <summary>
+        /// Creates a context for the same connection and reply, but another envelope (e.g. the command parsed from a CLI request).
+        /// </summary>
+        public IpcRequestContext WithEnvelope(IpcEnvelope envelope)
+        {
+            return new IpcRequestContext(envelope, Stream, _writeLock, _replyState)
+            {
+                ConnectionOrigin = ConnectionOrigin,
+#if !GREENSHOT_LIGHT
+                AiClient = AiClient,
+#endif
+                UsesTextFrames = UsesTextFrames,
+                WriteTimeout = WriteTimeout
+            };
+        }
+
+        /// <summary>
+        /// Sends a streaming chunk or the final reply.
+        /// </summary>
+        public async Task ReplyAsync(object responsePayload, CancellationToken cancellationToken = default)
+        {
+            if (responsePayload == null)
+            {
+                throw new ArgumentNullException(nameof(responsePayload));
+            }
+
+            if (!UsesTextFrames)
+            {
+                await WriteJsonFrameAsync(responsePayload, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            var reply = JsonSerializer.SerializeToNode(responsePayload, GreenshotJson.Options) as JsonObject ?? new JsonObject();
+            string stream = GetText(reply, "stream");
+            if (stream != null)
+            {
+                string text = GetText(reply, "text");
+                byte type = string.Equals(stream, "stderr", StringComparison.OrdinalIgnoreCase) ? TextFrameStderr : TextFrameStdout;
+                await WriteTextFrameAsync(type, text, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (_replyState.Completed)
+            {
+                Log.Warn("Ignoring an additional final reply for a request that already completed.");
+                return;
+            }
+
+            if (Envelope.Json)
+            {
+                // --json: the reply object is the result document
+                await WriteTextFrameAsync(TextFrameStdout, reply.ToJsonString(GreenshotJson.Options), cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await WriteTextFrameAsync(TextFrameStdout, GetText(reply, "stdout"), cancellationToken).ConfigureAwait(false);
+                await WriteTextFrameAsync(TextFrameStderr, GetText(reply, "stderr"), cancellationToken).ConfigureAwait(false);
+            }
+
+            int exitCode = reply["exit_code"] is JsonValue exitCodeValue && exitCodeValue.TryGetValue(out int code) ? code : 0;
+            if (exitCode == 0 && string.Equals(GetText(reply, "status"), "error", StringComparison.OrdinalIgnoreCase))
+            {
+                exitCode = 1;
+            }
+            await CompleteAsync(exitCode, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// A text value of the reply, null when it is missing or null; other values as their JSON
+        /// </summary>
+        private static string GetText(JsonObject reply, string name)
+        {
+            var value = reply[name];
+            return value is JsonValue jsonValue && jsonValue.TryGetValue(out string text) ? text : value?.ToJsonString();
+        }
+
+        /// <summary>
+        /// Text mode: sends the exit frame unless the reply was already completed (e.g. for commands without a reply).
+        /// Has no effect for JSON connections.
+        /// </summary>
+        public async Task CompleteAsync(int exitCode = 0, CancellationToken cancellationToken = default)
+        {
+            if (!UsesTextFrames || _replyState.Completed)
+            {
+                return;
+            }
+            _replyState.Completed = true;
+
+            byte[] frame = new byte[5];
+            frame[0] = TextFrameExit;
+            byte[] code = BitConverter.GetBytes(exitCode);
+            if (!BitConverter.IsLittleEndian)
+            {
+                Array.Reverse(code);
+            }
+            Buffer.BlockCopy(code, 0, frame, 1, 4);
+            await WriteFrameAsync(frame, cancellationToken).ConfigureAwait(false);
+        }
+
+        private Task WriteTextFrameAsync(byte type, string text, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return Task.CompletedTask;
+            }
+            if (!text.EndsWith("\n", StringComparison.Ordinal))
+            {
+                text += "\n";
+            }
+            byte[] textBytes = Encoding.UTF8.GetBytes(text);
+            byte[] frame = new byte[textBytes.Length + 1];
+            frame[0] = type;
+            Buffer.BlockCopy(textBytes, 0, frame, 1, textBytes.Length);
+            return WriteFrameAsync(frame, cancellationToken);
+        }
+
+        private static async Task<bool> CompletesWithinAsync(Task task, TimeSpan timeout, CancellationToken cancellationToken)
+        {
+            using (var delayCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            {
+                var completed = await Task.WhenAny(task, Task.Delay(timeout, delayCancellation.Token)).ConfigureAwait(false);
+                // Stop the timer when the write finished first
+                delayCancellation.Cancel();
+                return completed == task;
+            }
+        }
+
+        /// <summary>
+        /// Writes a 4-byte little-endian length prefix followed by the payload.
+        /// </summary>
+        private Task WriteFrameAsync(byte[] payload, CancellationToken cancellationToken)
+        {
+            byte[] frame = new byte[LengthPrefixSize + payload.Length];
+            WriteLengthPrefix(frame, payload.Length);
+            Buffer.BlockCopy(payload, 0, frame, LengthPrefixSize, payload.Length);
+            return WriteFrameBytesAsync(frame, frame.Length, cancellationToken);
+        }
+
+        /// <summary>
+        /// Writes the reply as one frame: the JSON is serialized as UTF-8 straight behind the length prefix into a pooled buffer,
+        /// byte arrays (the image of an AI tool reply) as base64 without a string in between.
+        /// </summary>
+        private async Task WriteJsonFrameAsync(object payload, CancellationToken cancellationToken)
+        {
+            using MemoryStream buffer = RecyclableMemoryStreamFactory.GetStream("IpcReply");
+            buffer.SetLength(LengthPrefixSize);
+            buffer.Position = LengthPrefixSize;
+            await JsonSerializer.SerializeAsync(buffer, payload, payload.GetType(), GreenshotJson.Options, cancellationToken).ConfigureAwait(false);
+
+            int frameLength = checked((int)buffer.Length);
+            byte[] frame = buffer.GetBuffer();
+            WriteLengthPrefix(frame, frameLength - LengthPrefixSize);
+            await WriteFrameBytesAsync(frame, frameLength, cancellationToken).ConfigureAwait(false);
+        }
+
+        private const int LengthPrefixSize = 4;
+
+        private static void WriteLengthPrefix(byte[] frame, int payloadLength)
+        {
+            uint length = (uint)payloadLength;
+            // Little-endian, like BitConverter on Windows
+            frame[0] = unchecked((byte)length);
+            frame[1] = unchecked((byte)(length >> 8));
+            frame[2] = unchecked((byte)(length >> 16));
+            frame[3] = unchecked((byte)(length >> 24));
+        }
+
+        /// <summary>
+        /// Writes the first <paramref name="count"/> bytes of the frame, which already starts with its length prefix
+        /// </summary>
+        private async Task WriteFrameBytesAsync(byte[] frame, int count, CancellationToken cancellationToken)
+        {
+            if (_replyState.ClientGone)
+            {
+                return;
+            }
+
+            // One write per frame. No Flush: a pipe has no stream buffer, and FlushFileBuffers would wait until the client read everything.
+            await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            bool closedHere = false;
+            try
+            {
+                var writeTask = Stream.WriteAsync(frame, 0, count, cancellationToken);
+                if (!writeTask.IsCompleted && !await CompletesWithinAsync(writeTask, WriteTimeout, cancellationToken).ConfigureAwait(false))
+                {
+                    // The client does not read its replies. Closing the connection ends the pending write (and the connection),
+                    // instead of keeping the handler waiting forever.
+                    Log.Warn($"IPC client did not read its reply within {WriteTimeout.TotalSeconds:0} seconds, closing the connection.");
+                    closedHere = true;
+                    Stream.Dispose();
+                    _ = writeTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    throw new IOException("The IPC client did not read the reply in time.");
+                }
+                await writeTask.ConfigureAwait(false);
+            }
+            catch (IOException) when (!closedHere && IsClientGone())
+            {
+                // Not an error: e.g. a second Greenshot.exe only forwards its command and exits, or greenshot-cli was stopped
+                _replyState.ClientGone = true;
+                Log.Debug($"The IPC client closed the connection, the reply to '{Envelope.Command}' is dropped.");
+            }
+            finally
+            {
+                _writeLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// True when the pipe is broken because the client closed its end
+        /// </summary>
+        private bool IsClientGone()
+        {
+            try
+            {
+                return Stream is PipeStream pipe && !pipe.IsConnected;
+            }
+            catch (ObjectDisposedException)
+            {
+                return false;
+            }
+        }
+    }
+}

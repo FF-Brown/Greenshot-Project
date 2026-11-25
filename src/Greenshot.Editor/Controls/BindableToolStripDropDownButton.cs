@@ -1,13 +1,13 @@
 ﻿/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -30,12 +30,9 @@ namespace Greenshot.Editor.Controls
     /// Also, when a DropDownItem is selected, the DropDownButton adopts its Tag and Image.
     /// The selected tag can be accessed via SelectedTag property.
     /// </summary>
-    public class BindableToolStripDropDownButton : ToolStripDropDownButton, INotifyPropertyChanged, IGreenshotLanguageBindable
+    public class BindableToolStripDropDownButton : ToolStripDropDownButton, INotifyPropertyChanged
     {
         public event PropertyChangedEventHandler PropertyChanged;
-
-        [Category("Greenshot"), DefaultValue(null), Description("Specifies key of the language file to use when displaying the text.")]
-        public string LanguageKey { get; set; }
 
         public object SelectedTag
         {
@@ -53,27 +50,37 @@ namespace Greenshot.Editor.Controls
             if (Tag == null || !Tag.Equals(clickedItem.Tag))
             {
                 Tag = clickedItem.Tag;
-                Image = clickedItem.Image;
+                ShowImageOf(clickedItem);
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("SelectedTag"));
             }
 
             base.OnDropDownItemClicked(e);
         }
 
+        /// <summary>
+        /// Show the icon of the item: its own copy when the item is bound (the copy of the item is replaced when the size changes)
+        /// </summary>
+        private void ShowImageOf(ToolStripItem item)
+        {
+            if (!IconBinder.BindLike(this, item))
+            {
+                Image = item.Image;
+            }
+        }
+
         private void AdoptFromTag(object tag)
         {
+            foreach (ToolStripItem item in DropDownItems)
+            {
+                if (item.Tag != null && item.Tag.Equals(tag))
+                {
+                    ShowImageOf(item);
+                    break;
+                }
+            }
+
             if (Tag == null || !Tag.Equals(tag))
             {
-                Tag = tag;
-                foreach (ToolStripItem item in DropDownItems)
-                {
-                    if (item.Tag != null && item.Tag.Equals(tag))
-                    {
-                        Image = item.Image;
-                        break;
-                    }
-                }
-
                 Tag = tag;
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("SelectedTag"));
             }

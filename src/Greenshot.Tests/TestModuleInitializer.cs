@@ -1,0 +1,66 @@
+/*
+ * Greenshot - a free and open source screenshot tool
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
+ * 
+ * For more information see: https://getgreenshot.org/
+ * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+using System.Runtime.CompilerServices;
+using Greenshot.Base.Core;
+
+namespace Greenshot.Tests
+{
+    /// <summary>
+    /// Runs once when the test assembly is loaded, before any test.
+    /// </summary>
+    internal static class TestModuleInitializer
+    {
+        [ModuleInitializer]
+        internal static void Initialize()
+        {
+            // The hotkey tests (and every recipe with a hotkey trigger) register hotkeys, which would install the
+            // low-level keyboard hook of Dapplo.Windows: when the test host exits after all tests passed, the hook's
+            // thread throws and the test run is reported as crashed. The tests feed keys with HandleKeyboardEvent instead.
+            HotkeyManager.UseKeyboardHook = false;
+
+            // The editor reacts to Shift, Ctrl and pressed mouse buttons while drawing; the tests must not see what the user
+            // does on the desktop during the test run (Shift turned a drawn rectangle into a square)
+            InputState.ModifierKeysSource = () => System.Windows.Forms.Keys.None;
+            InputState.MouseButtonsSource = () => System.Windows.Forms.MouseButtons.None;
+
+            // Many classes read their configuration section in a static field. xunit.v3 runs the tests in a random order, so the
+            // configuration has to exist before the first test: a type initializer that failed stays broken for the whole run.
+            IniConfigHelper.EnsureInitialized();
+
+            // An exception in a window procedure (e.g. a control created on an MTA thread) would show the WinForms exception
+            // dialog on the desktop and block the test run, it has to fail the test which created the window instead
+            // Not only for this thread: the windows of the tests are created on their own threads
+            System.Windows.Forms.Application.SetUnhandledExceptionMode(System.Windows.Forms.UnhandledExceptionMode.ThrowException, false);
+        }
+    }
+}
+
+namespace System.Runtime.CompilerServices
+{
+    /// <summary>
+    /// .NET Framework 4.8 doesn't have this attribute, the C# compiler only needs it by name.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Method, Inherited = false)]
+    internal sealed class ModuleInitializerAttribute : Attribute
+    {
+    }
+}

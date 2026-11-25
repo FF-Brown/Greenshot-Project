@@ -1,0 +1,215 @@
+<Window x:Class="Greenshot.Plugin.RecipeEditor.Views.SelectEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wpf="clr-namespace:Greenshot.Base.Wpf;assembly=Greenshot.Base"
+        Title="{wpf:Text RecipeEditor.SelectEditorTitle}"
+        Height="540" Width="820"
+        MinHeight="440" MinWidth="680"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="True"
+        Topmost="True"
+        FontFamily="Segoe UI, Segoe UI Variable Display, Tahoma, Arial"
+        Background="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.WindowBackground}">
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Greenshot.Base;component/Wpf/Styles/GreenshotStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <!-- Outer Window Border -->
+    <Border BorderBrush="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.CardBorder}" BorderThickness="1">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/> <!-- Title bar -->
+                <RowDefinition Height="Auto"/> <!-- Description header -->
+                <RowDefinition Height="*"/> <!-- Two-column content: List & Preview -->
+                <RowDefinition Height="Auto"/> <!-- Footer -->
+            </Grid.RowDefinitions>
+
+            <wpf:ThemedTitleBar Grid.Row="0"/>
+
+            <!-- Header Description -->
+            <Border Grid.Row="1" Margin="16,10,16,10">
+                <TextBlock Text="{wpf:Text RecipeEditor.SelectEditorIntro}"
+                           FontSize="{wpf:FontSize 11}" Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.TextSecondary}" TextWrapping="Wrap"/>
+            </Border>
+
+            <!-- Main Content: Left List & Right Preview -->
+            <Grid Grid.Row="2" Margin="16,0,16,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="320"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left Column: Open Editors List -->
+                <Border Grid.Column="0" Background="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.CardBackground}"
+                        BorderBrush="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.CardBorder}"
+                        BorderThickness="1" CornerRadius="6" Padding="6">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0" BorderBrush="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.CardBorder}" BorderThickness="0,0,0,1" Padding="6,4,6,8" Margin="0,0,0,4">
+                            <TextBlock x:Name="ListHeaderTextBlock" Text="{wpf:Text RecipeEditor.SelectEditorListHeader}" FontWeight="SemiBold" FontSize="{wpf:FontSize 11}" Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.TextSecondary}"/>
+                        </Border>
+
+                        <ListBox x:Name="EditorListBox" Grid.Row="1" Background="Transparent" BorderThickness="0"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 SelectionChanged="EditorListBox_SelectionChanged"
+                                 MouseDoubleClick="EditorListBox_MouseDoubleClick">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="Padding" Value="8,6"/>
+                                    <Setter Property="Margin" Value="0,2"/>
+                                    <Setter Property="Cursor" Value="Hand"/>
+                                    <!-- The template draws no focus, the shared frame shows the keyboard focus -->
+                                    <Setter Property="FocusVisualStyle" Value="{StaticResource GreenshotFocusVisual}"/>
+                                    <!-- Screen readers announce the editor's title instead of the class name -->
+                                    <Setter Property="AutomationProperties.Name" Value="{Binding Title, TargetNullValue=''}"/>
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="ListBoxItem">
+                                                <Border x:Name="itemBorder"
+                                                        Background="Transparent"
+                                                        BorderBrush="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.CardBorder}"
+                                                        BorderThickness="1"
+                                                        CornerRadius="5"
+                                                        Padding="{TemplateBinding Padding}"
+                                                        SnapsToDevicePixels="True">
+                                                    <ContentPresenter/>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="itemBorder" Property="Background" Value="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.BadgeBackground}"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsSelected" Value="True">
+                                                        <Setter TargetName="itemBorder" Property="Background" Value="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.WindowBackground}"/>
+                                                        <Setter TargetName="itemBorder" Property="BorderBrush" Value="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.Accent}"/>
+                                                        <Setter TargetName="itemBorder" Property="BorderThickness" Value="1.5"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="2,2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <Border Grid.Column="0" Width="32" Height="32" CornerRadius="4"
+                                                Background="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.BadgeBackground}"
+                                                BorderBrush="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.CardBorder}"
+                                                BorderThickness="1" Margin="0,0,10,0"
+                                                VerticalAlignment="Center" HorizontalAlignment="Center">
+                                            <TextBlock Text="🖼️" FontSize="{wpf:FontSize 14}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="{wpf:FontSize 11}"
+                                                       Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.TextPrimary}"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="{Binding Description}" FontSize="{wpf:FontSize 10}"
+                                                       Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.TextSecondary}"
+                                                       Margin="0,2,0,0"/>
+                                        </StackPanel>
+
+                                        <TextBlock Grid.Column="2" Text="➔" FontSize="{wpf:FontSize 11}"
+                                                   Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.Accent}"
+                                                   VerticalAlignment="Center" Margin="6,0,2,0"
+                                                   FontWeight="Bold"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+                </Border>
+
+                <!-- Right Column: Live Preview Panel -->
+                <Border Grid.Column="1" Margin="12,0,0,0"
+                        Background="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.CardBackground}"
+                        BorderBrush="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.CardBorder}"
+                        BorderThickness="1" CornerRadius="6" Padding="14">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Preview Header -->
+                        <Grid Grid.Row="0" Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,8,0">
+                                <TextBlock Text="{wpf:Text RecipeEditor.SelectEditorPreviewHeader}" FontSize="{wpf:FontSize 9}" FontWeight="Bold" Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.Accent}" Margin="0,0,0,2"/>
+                                <TextBlock x:Name="PreviewTitleTextBlock" FontWeight="Bold" FontSize="{wpf:FontSize 12}"
+                                           Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.TextPrimary}" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Border Background="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.BadgeBackground}"
+                                        BorderBrush="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.CardBorder}"
+                                        BorderThickness="1" CornerRadius="4" Padding="6,3" Margin="0,0,6,0">
+                                    <TextBlock x:Name="PreviewDimensionsBadge" FontSize="{wpf:FontSize 10}" Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.TextPrimary}"/>
+                                </Border>
+
+                                <Border Background="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.BadgeBackground}"
+                                        BorderBrush="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.CardBorder}"
+                                        BorderThickness="1" CornerRadius="4" Padding="6,3">
+                                    <TextBlock x:Name="PreviewCountBadge" FontSize="{wpf:FontSize 10}" FontWeight="SemiBold" Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.Accent}"/>
+                                </Border>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- Preview Display Surface -->
+                        <Border Grid.Row="1"
+                                Background="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.WindowBackground}"
+                                BorderBrush="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.CardBorder}"
+                                BorderThickness="1" CornerRadius="5" ClipToBounds="True">
+                            <Grid>
+                                <Image x:Name="PreviewImage" AutomationProperties.Name="{wpf:Text RecipeEditor.SelectEditorPreview}" Stretch="Uniform" Margin="10" SnapsToDevicePixels="True"/>
+                                <TextBlock x:Name="NoPreviewTextBlock" Text="{wpf:Text RecipeEditor.SelectEditorNoPreview}"
+                                           FontSize="{wpf:FontSize 11}" Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.TextSecondary}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Visibility="Collapsed"/>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- Footer Action Buttons -->
+            <Border Grid.Row="3" Background="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.CardBackground}"
+                    BorderBrush="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.CardBorder}"
+                    BorderThickness="0,1,0,0" Padding="16,10">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock x:Name="StatusTextBlock" wpf:LiveRegion.Mode="Polite" FontSize="{wpf:FontSize 11}" Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.TextSecondary}" VerticalAlignment="Center"/>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <Button Content="{wpf:Text Core.Cancel}" Style="{StaticResource SecondaryButtonStyle}" Margin="0,0,8,0" IsCancel="True" Click="CancelButton_Click"/>
+                        <Button x:Name="OkButton" Content="{wpf:Text RecipeEditor.SelectEditorBtnImport}" Style="{StaticResource PrimaryButtonStyle}" IsDefault="True" Click="OkButton_Click"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

@@ -1,0 +1,245 @@
+/*
+ * Greenshot - a free and open source screenshot tool
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
+ *
+ * For more information see: https://getgreenshot.org/
+ * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+using System;
+using Greenshot.Base.Controls;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using Greenshot.Base.Languages;
+using Greenshot.Base.Wpf;
+using Greenshot.Plugin.RecipeEditor.Helpers;
+using Greenshot.Base.Core;
+
+namespace Greenshot.Plugin.RecipeEditor.Views
+{
+    /// <summary>
+    /// Modern interactive dialog for importing annotations into a recipe step.
+    /// </summary>
+    public partial class ImportAnnotationsWindow : Window
+    {
+        private List<ImportableElementItem> _items;
+        private bool _isSortAscending = true;
+
+        public bool ShouldReplaceExisting => ReplaceRadio.IsChecked == true;
+
+        public List<Dictionary<string, object>> ResultAnnotations { get; private set; } = new List<Dictionary<string, object>>();
+
+        public ImportAnnotationsWindow(
+            IEnumerable<ImportableElementItem> items,
+            string sourceName,
+            string recipeName,
+            bool hasExistingAnnotations)
+        {
+            InitializeComponent();
+
+            // Default sorted by A-Z
+            _items = (items ?? Enumerable.Empty<ImportableElementItem>())
+                .OrderBy(i => i.Type)
+                .ThenBy(i => i.Description)
+                .ToList();
+
+            ElementsListView.ItemsSource = _items;
+
+            SourceTextBlock.Text = string.Format(_items.Count == 1 ? Texts.Get<IRecipeEditorLanguage>().ImportSourceOne : Texts.Get<IRecipeEditorLanguage>().ImportSourceMany, sourceName ?? Texts.Get<IRecipeEditorLanguage>().ImportImageSource, _items.Count);
+
+            // Target Step Mode: pre-select based on whether step already has annotations, but keep both responsive
+            if (hasExistingAnnotations)
+            {
+                AppendRadio.IsChecked = true;
+            }
+            else
+            {
+                ReplaceRadio.IsChecked = true;
+            }
+
+            AppendRadio.Checked += (s, e) => UpdateCardHighlights();
+            ReplaceRadio.Checked += (s, e) => UpdateCardHighlights();
+            UpdateCardHighlights();
+
+            string defaultDir = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+            if (string.IsNullOrWhiteSpace(defaultDir) || !Directory.Exists(defaultDir))
+            {
+                defaultDir = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            }
+            DirectoryTextBox.Text = defaultDir;
+
+            string safeRecipeName = FilenameHelper.MakeFilenameSafe(string.IsNullOrWhiteSpace(recipeName) ? "annotation" : recipeName);
+            BaseFileNameTextBox.Text = safeRecipeName;
+
+            SourceInitialized += (s, e) => ApplyImmersiveDarkMode();
+
+            UpdateUIState();
+        }
+
+        private void OnAppendCardClicked(object sender, MouseButtonEventArgs e)
+        {
+            AppendRadio.IsChecked = true;
+            UpdateCardHighlights();
+        }
+
+        private void OnReplaceCardClicked(object sender, MouseButtonEventArgs e)
+        {
+            ReplaceRadio.IsChecked = true;
+            UpdateCardHighlights();
+        }
+
+        private void UpdateCardHighlights()
+        {
+            if (AppendCard != null && ReplaceCard != null)
+            {
+                bool isAppend = AppendRadio.IsChecked == true;
+                AppendCard.BorderBrush = isAppend ? ThemeManager.Instance.CurrentPalette.Accent : ThemeManager.Instance.CurrentPalette.CardBorder;
+                ReplaceCard.BorderBrush = !isAppend ? ThemeManager.Instance.CurrentPalette.Accent : ThemeManager.Instance.CurrentPalette.CardBorder;
+            }
+        }
+
+        private void OnSortClicked(object sender, RoutedEventArgs e)
+        {
+            _isSortAscending = !_isSortAscending;
+            if (_isSortAscending)
+            {
+                _items = _items.OrderBy(i => i.Type).ThenBy(i => i.Description).ToList();
+                SortButton.Content = Texts.Get<IRecipeEditorLanguage>().ImportSortAscending;
+            }
+            else
+            {
+                _items = _items.OrderByDescending(i => i.Type).ThenByDescending(i => i.Description).ToList();
+                SortButton.Content = Texts.Get<IRecipeEditorLanguage>().ImportSortDescending;
+            }
+            ElementsListView.ItemsSource = null;
+            ElementsListView.ItemsSource = _items;
+        }
+
+        private void UpdateUIState()
+        {
+            int selectedCount = _items.Count(i => i.IsSelected);
+            StatusTextBlock.Text = string.Format(selectedCount == 1 ? Texts.Get<IRecipeEditorLanguage>().ImportSelectedOne : Texts.Get<IRecipeEditorLanguage>().ImportSelectedMany, selectedCount, _items.Count);
+            ImportBtn.IsEnabled = selectedCount > 0;
+
+            if (_items.Count > 0)
+            {
+                if (selectedCount == _items.Count)
+                {
+                    SelectAllCheckBox.IsChecked = true;
+                }
+                else if (selectedCount == 0)
+                {
+                    SelectAllCheckBox.IsChecked = false;
+                }
+                else
+                {
+                    SelectAllCheckBox.IsChecked = null; // Indeterminate
+                }
+            }
+
+            bool anySaveToFile = _items.Any(i => i.IsSelected && i.CanSaveAsFile && i.StorageMode == AssetStorageMode.SaveToFile);
+            AssetOutputPanel.Visibility = anySaveToFile ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void OnSelectAllClicked(object sender, RoutedEventArgs e)
+        {
+            bool check = SelectAllCheckBox.IsChecked == true;
+            foreach (var item in _items)
+            {
+                item.IsSelected = check;
+            }
+            UpdateUIState();
+        }
+
+        private void OnItemSelectionChanged(object sender, RoutedEventArgs e)
+        {
+            UpdateUIState();
+        }
+
+        private void OnStorageModeChanged(object sender, SelectionChangedEventArgs e)
+        {
+            UpdateUIState();
+        }
+
+        private void OnBrowseDirectoryClicked(object sender, RoutedEventArgs e)
+        {
+            string folder = FileDialogs.PickFolder(this, Texts.Get<IRecipeEditorLanguage>().ImportSelectFolder, DirectoryTextBox.Text);
+            if (folder != null)
+            {
+                DirectoryTextBox.Text = folder;
+            }
+        }
+
+        private void OnProceedClicked(object sender, RoutedEventArgs e)
+        {
+            var selectedItems = _items.Where(i => i.IsSelected).ToList();
+            if (selectedItems.Count == 0)
+            {
+                ThemedMessageBox.Show(this, Texts.Get<IRecipeEditorLanguage>().ImportNothingSelected, Texts.Get<IRecipeEditorLanguage>().TitleImportAnnotations, MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            bool anySaveToFile = selectedItems.Any(i => i.CanSaveAsFile && i.StorageMode == AssetStorageMode.SaveToFile);
+            string targetDir = DirectoryTextBox.Text?.Trim();
+            if (anySaveToFile)
+            {
+                if (string.IsNullOrWhiteSpace(targetDir))
+                {
+                    ThemedMessageBox.Show(this, Texts.Get<IRecipeEditorLanguage>().ImportNoFolder, Texts.Get<IRecipeEditorLanguage>().TitleInvalidDirectory, MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+                try
+                {
+                    if (!Directory.Exists(targetDir))
+                    {
+                        Directory.CreateDirectory(targetDir);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ThemedMessageBox.Show(this, string.Format(Texts.Get<IRecipeEditorLanguage>().ImportFolderError, targetDir) + "\n" + ex.Message, Texts.Core.Error, MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+            }
+
+            string baseName = BaseFileNameTextBox.Text?.Trim();
+            if (string.IsNullOrWhiteSpace(baseName))
+            {
+                baseName = "asset";
+            }
+
+            ResultAnnotations = EditorAnnotationImporter.ProcessImport(selectedItems, targetDir, baseName);
+            DialogResult = true;
+            Close();
+        }
+
+        private void OnCancelClicked(object sender, RoutedEventArgs e)
+        {
+            DialogResult = false;
+            Close();
+        }
+
+        private void ApplyImmersiveDarkMode()
+        {
+            // The title bar in the colors of the theme, it follows theme changes from now on
+            WindowFrameTheme.Attach(this);
+        }
+    }
+}

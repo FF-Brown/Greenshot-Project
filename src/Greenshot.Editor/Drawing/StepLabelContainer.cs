@@ -1,13 +1,13 @@
-﻿/*
+/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2012  Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026  Thomas Braun, Jens Klingen, Robin Krom
  *
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
@@ -24,6 +24,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.Runtime.Serialization;
+using System.Windows.Forms;
 using Dapplo.Windows.Common.Extensions;
 using Dapplo.Windows.Common.Structs;
 using Greenshot.Base.Interfaces;
@@ -37,7 +38,7 @@ namespace Greenshot.Editor.Drawing
     /// To make sure that deleting recalculates, we check the location before every draw.
     /// </summary>
     [Serializable]
-    public sealed class StepLabelContainer : DrawableContainer
+    public sealed class StepLabelContainer : DrawableContainer, IHaveScaleOptions
     {
         [NonSerialized] private StringFormat _stringFormat = new StringFormat();
 
@@ -92,6 +93,20 @@ namespace Greenshot.Editor.Drawing
                 Alignment = StringAlignment.Center,
                 LineAlignment = StringAlignment.Center
             };
+
+            // Fix old data where thickness and shadow were not set (backwards compatibility)
+            if (!HasField(FieldType.LINE_THICKNESS))
+            {
+                AddField(GetType(), FieldType.LINE_THICKNESS, 0);
+                // actively set because AddField above uses 0 as default but overrides it with current value from config file
+                SetFieldValue(FieldType.LINE_THICKNESS, 0);
+            }
+            if (!HasField(FieldType.SHADOW))
+            {
+                AddField(GetType(), FieldType.SHADOW, false);
+                // actively set because AddField above uses false as default but overrides it with current value from config file
+                SetFieldValue(FieldType.SHADOW, false);
+            }
         }
 
         /// <summary>
@@ -147,6 +162,8 @@ namespace Greenshot.Editor.Drawing
         {
             AddField(GetType(), FieldType.FILL_COLOR, Color.DarkRed);
             AddField(GetType(), FieldType.LINE_COLOR, Color.White);
+            AddField(GetType(), FieldType.LINE_THICKNESS, 0);
+            AddField(GetType(), FieldType.SHADOW, false);
             AddField(GetType(), FieldType.FLAGS, FieldFlag.COUNTER);
         }
 
@@ -187,6 +204,8 @@ namespace Greenshot.Editor.Drawing
         /// <param name="rm"></param>
         public override void Draw(Graphics graphics, RenderMode rm)
         {
+            if (Width == 0 || Height == 0) { return; }
+
             graphics.SmoothingMode = SmoothingMode.HighQuality;
             graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
             graphics.CompositingQuality = CompositingQuality.HighQuality;
@@ -196,31 +215,54 @@ namespace Greenshot.Editor.Drawing
             var rect = new NativeRect(Left, Top, Width, Height).Normalize();
             Color fillColor = GetFieldValueAsColor(FieldType.FILL_COLOR);
             Color lineColor = GetFieldValueAsColor(FieldType.LINE_COLOR);
+            int lineThickness = GetFieldValueAsInt(FieldType.LINE_THICKNESS);
+            bool shadow = GetFieldValueAsBool(FieldType.SHADOW);
+
             if (_drawAsRectangle)
             {
-                RectangleContainer.DrawRectangle(rect, graphics, rm, 0, Color.Transparent, fillColor, false);
+                RectangleContainer.DrawRectangle(rect, graphics, rm, lineThickness, lineColor, fillColor, shadow);
             }
             else
             {
-                EllipseContainer.DrawEllipse(rect, graphics, rm, 0, Color.Transparent, fillColor, false);
+                EllipseContainer.DrawEllipse(rect, graphics, rm, lineThickness, lineColor, fillColor, shadow);
             }
 
-            float fontSize = Math.Min(Math.Abs(Width), Math.Abs(Height)) / 1.4f;
-            using FontFamily fam = new FontFamily(FontFamily.GenericSansSerif.Name);
-            using Font font = new Font(fam, fontSize, FontStyle.Bold, GraphicsUnit.Pixel);
+            using FontFamily fam = new(FontFamily.GenericSansSerif.Name);
+            using Font font = new(fam, NumberFontSize(text), FontStyle.Bold, GraphicsUnit.Pixel);
             TextContainer.DrawText(graphics, rect, 0, lineColor, false, _stringFormat, text, font);
+        }
+
+        /// <summary>
+        /// The number of this label, as drawn
+        /// </summary>
+        internal string NumberText => ((Surface) Parent).CountStepLabels(this).ToString();
+
+        /// <summary>
+        /// A rectangle instead of the circle
+        /// </summary>
+        internal bool DrawAsRectangle => _drawAsRectangle;
+
+        /// <summary>
+        /// The size in pixels of the bold number in the generic sans serif family, so it fits the label
+        /// </summary>
+        internal float NumberFontSize(string text)
+        {
+            using FontFamily fam = new(FontFamily.GenericSansSerif.Name);
+            //calculate new font size based on ratio from text height and text width
+            float initialFontSize = Math.Min(Math.Abs(Width), Math.Abs(Height));
+            using Font measureFont = new(fam, initialFontSize, FontStyle.Bold, GraphicsUnit.Pixel);
+            var measured = TextRenderer.MeasureText(text, measureFont);
+            //static scale for optimal fit
+            return initialFontSize * measured.Height / measured.Width * 0.7f;
         }
 
         public override bool ClickableAt(int x, int y)
         {
+            // The number is always drawn, so the whole label can be clicked, also with a transparent fill (BUG-2367)
             var rect = new NativeRect(Left, Top, Width, Height).Normalize();
-            Color fillColor = GetFieldValueAsColor(FieldType.FILL_COLOR);
-            if (_drawAsRectangle)
-            {
-                return RectangleContainer.RectangleClickableAt(rect, 0, fillColor, x, y);
-            }
-
-            return EllipseContainer.EllipseClickableAt(rect, 0, fillColor, x, y);
+            return rect.Contains(x, y);
         }
+
+        public ScaleOptions GetScaleOptions() => ScaleOptions.Rational;
     }
 }

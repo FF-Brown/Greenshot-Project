@@ -1,13 +1,13 @@
 ﻿/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  *
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
@@ -59,7 +59,7 @@ namespace Greenshot.Helpers
         ///     Create a ResourceMutex for the specified mutex id and resource-name
         /// </summary>
         /// <param name="mutexId">ID of the mutex, preferably a Guid as string</param>
-        /// <param name="resourceName">Name of the resource to lock, e.g your application name, usefull for logs</param>
+        /// <param name="resourceName">Name of the resource to lock, e.g your application name, useful for logs</param>
         /// <param name="global">true to have a global mutex see: https://msdn.microsoft.com/en-us/library/bwe34f1k.aspx </param>
         public static ResourceMutex Create(string mutexId, string resourceName = null, bool global = false)
         {
@@ -90,7 +90,9 @@ namespace Greenshot.Helpers
                 // 1) Create Mutex
                 _applicationMutex = new Mutex(true, _mutexId, out var createdNew, mutexSecurity);
                 // 2) if the mutex wasn't created new get the right to it, this returns false if it's already locked
+#pragma warning disable RS0030 // R1: a mutex is owned by the thread which acquired it, so it can't be awaited; this waits at most 100 ms at startup
                 if (!createdNew && !_applicationMutex.WaitOne(100, false))
+#pragma warning restore RS0030
                 {
                     Log.InfoFormat("{0} is already in use, mutex {1} is NOT locked for the caller", _resourceName, _mutexId);
                     IsLocked = false;
@@ -142,6 +144,8 @@ namespace Greenshot.Helpers
                 try
                 {
                     _applicationMutex.ReleaseMutex();
+                    // Also close the handle: while one is open the mutex exists, and the AppMutex check of a setup or uninstaller sees Greenshot running
+                    _applicationMutex.Close();
                     _applicationMutex = null;
                     Log.InfoFormat("Released Mutex {0} for {1}", _mutexId, _resourceName);
                 }

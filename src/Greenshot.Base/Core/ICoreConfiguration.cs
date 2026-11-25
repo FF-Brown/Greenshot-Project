@@ -1,0 +1,584 @@
+/*
+ * Greenshot - a free and open source screenshot tool
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
+ *
+ * For more information see: https://getgreenshot.org/
+ * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+using System.Runtime.Serialization;
+using Dapplo.Ini.Attributes;
+using Dapplo.Ini.Interfaces;
+using Dapplo.Windows.Common.Structs;
+using Greenshot.Base.Core.Enums;
+using Greenshot.Base.Core.FileFormat;
+using Greenshot.Base.Interfaces;
+using Dapplo.Ini.WindowsPolicies;
+
+namespace Greenshot.Base.Core
+{
+    [IniSection("Core")]
+    [Description("Greenshot core configuration")]
+    public interface ICoreConfiguration : IIniSection, INotifyPropertyChanged, IAfterLoad, IBeforeSave
+    {
+        [Description("The language in IETF format (e.g. en-US)")]
+        [PolicyCategory(PolicyCategories.Common)]
+        string Language { get; set; }
+
+        [DataMember(Name = "BetaTester")]
+        [Description("The user wants to be beta-tester, this enables some features not available otherwise.")]
+        bool IsBetaTester { get; set; }
+
+        [Description("Hotkey for starting the region capture")]
+        [DefaultValue("PrintScreen")]
+        string RegionHotkey { get; set; }
+
+        [Description("Hotkey for starting the window capture")]
+        [DefaultValue("Alt + PrintScreen")]
+        string WindowHotkey { get; set; }
+
+        [Description("Hotkey for starting the fullscreen capture")]
+        [DefaultValue("Ctrl + PrintScreen")]
+        string FullscreenHotkey { get; set; }
+
+        [Description("Hotkey for starting the last region capture")]
+        [DefaultValue("Shift + PrintScreen")]
+        string LastregionHotkey { get; set; }
+
+        [Description("Hotkey for opening the clipboard contents into the editor")]
+        string ClipboardHotkey { get; set; }
+
+        [Description("Was the welcome window shown? Greenshot shows it once, at its first start")]
+        bool WelcomeShown { get; set; }
+
+        [Description("Image search engines (Bing, Yandex) the user doesn't want to be asked about any more before a capture is sent to them")]
+        [NotAdministrable]
+        List<string> ImageSearchConfirmedEngines { get; set; }
+
+        [DataMember(Name = "Destinations")]
+        [Description("Which destinations? Possible options (more might be added by plugins) are: Editor, FileDefault, FileWithDialog, Clipboard, Printer, EMail, Picker, DestinationWindow")]
+        [DefaultValue("Picker")]
+        List<string> OutputDestinations { get; set; }
+
+        [Description("Specify which formats we copy on the clipboard? Options are: PNG, HTML, HTMLDATAURL and DIB")]
+        [DefaultValue("PNG,DIB")]
+        List<ClipboardFormat> ClipboardFormats { get; set; }
+
+        [Description("zlib compression level (1-9) for the PNG on the clipboard, it's made on every copy, so a lower level copies faster.")]
+        [DefaultValue(8)]
+        [Range(1, 9, ErrorMessage = "Clipboard PNG compression level must be between 1 and 9.")]
+        int ClipboardPngCompressionLevel { get; set; }
+
+        [Description("Should the mouse be captured?")]
+        [DefaultValue(true)]
+        bool CaptureMousepointer { get; set; }
+
+        [Description("Keep the HDR content of HDR displays with a capture, for JPEG XR files (a Source step without Hdr follows this)")]
+        [DefaultValue(false)]
+        bool CaptureHdr { get; set; }
+
+        [Description("Use interactive window selection to capture? (false=Capture active window)")]
+        [DefaultValue(false)]
+        bool CaptureWindowsInteractive { get; set; }
+
+        [Description("Wait before every capture of the screen (hotkey, menu, command line, recipes), e.g. to open a menu or popup first. Replaces CaptureDelay.")]
+        [DefaultValue(false)]
+        bool CaptureWait { get; set; }
+
+        [Description("Milliseconds to wait before every capture of the screen when CaptureWait is on, 0 to 600000.")]
+        [DefaultValue(3000)]
+        [Range(0, 600000, ErrorMessage = "CaptureWaitMilliseconds must be 0 to 600000.")]
+        int CaptureWaitMilliseconds { get; set; }
+
+        [Description("Show a countdown, with Cancel, during the wait before the capture (only for a wait of a second or more, never when started unattended).")]
+        [DefaultValue(true)]
+        bool CaptureWaitCountdown { get; set; }
+
+        [Description("Semicolon-separated list of explicit recipe file paths to load. Automatic directory scanning is disabled for security.")]
+        [DefaultValue(null)]
+        string RecipeFiles { get; set; }
+
+        [Description("The capture mode used to capture a screen. (Auto, FullScreen, Fixed)")]
+        [DefaultValue("Auto")]
+        ScreenCaptureMode ScreenCaptureMode { get; set; }
+
+        [Description("The screen number to capture when using ScreenCaptureMode Fixed.")]
+        [DefaultValue(1)]
+        int ScreenToCapture { get; set; }
+
+        [Description("Play a camera sound after taking a capture.")]
+        [DefaultValue(false)]
+        bool PlayCameraSound { get; set; }
+
+        [Description("Show a notification from the systray when a capture is taken.")]
+        [DefaultValue(true)]
+        bool ShowTrayNotification { get; set; }
+
+        [Description("Which notifications are shown: All, Warnings (warnings and errors), Errors or None. With ShowTrayNotification=False none are shown.")]
+        [DefaultValue("All")]
+        NotificationLevel NotificationLevel { get; set; }
+
+        [Description("Show a thumbnail of the capture in the notification, only the toasts of Windows can show it.")]
+        [DefaultValue(true)]
+        bool ShowNotificationThumbnail { get; set; }
+
+        [Description("Output file path of Greenshot 1.3, only read once to fill OutputDirectory; kept for going back to 1.3.")]
+        [NotAdministrable]
+        string OutputFilePath { get; set; }
+
+        [Description("The folder for screenshots, a template like ${user.pictures}\\Greenshots or ${user.desktop}\\${payload.time:yyyy-MM}; see docs/vNext/variables.md.")]
+        [PolicyCategory(PolicyCategories.Common)]
+        string OutputDirectory { get; set; }
+
+        [Description("Replaced by OutputFileIfExists: False is changed there once to Ask, then this is True again.")]
+        [DefaultValue(true)]
+        bool OutputFileAllowOverwrite { get; set; }
+
+        [Description("What happens if the file to save already exists: Overwrite, Ask (the save dialog; unattended the name gets a number) or AddNumber (\"name (2).png\").")]
+        [DefaultValue("Overwrite")]
+        FileExistsAction OutputFileIfExists { get; set; }
+
+        [Description("Filename pattern of Greenshot 1.3, only read once to fill OutputFileNameTemplate; kept for going back to 1.3.")]
+        [DefaultValue("${capturetime:d\"yyyy-MM-dd HH_mm_ss\"}-${title}")]
+        [NotAdministrable]
+        string OutputFileFilenamePattern { get; set; }
+
+        [Description("The file name of screenshots without extension, a template like ${payload.time:yyyy-MM-dd HH_mm_ss}-${payload.title}; may hold sub folders and counters (${counter.global}, ${counter.folder:000}); see docs/vNext/variables.md.")]
+        [PolicyCategory(PolicyCategories.Common)]
+        string OutputFileNameTemplate { get; set; }
+
+        [Description("Default file type for writing screenshots.")]
+        [DefaultValue(WellKnownFileFormats.Png)]
+        [PolicyCategory(PolicyCategories.Common)]
+        string OutputFileFormat { get; set; }
+
+        [Description("If set to true, than the colors of the output file are reduced to 256 (8-bit) colors")]
+        [DefaultValue(false)]
+        bool OutputFileReduceColors { get; set; }
+
+        [Description("If set to true the amount of colors is counted and if smaller than 256 the color reduction is automatically used.")]
+        [DefaultValue(false)]
+        bool OutputFileAutoReduceColors { get; set; }
+
+        [Description("Amount of colors to reduce to, when reducing")]
+        [DefaultValue(256)]
+        int OutputFileReduceColorsTo { get; set; }
+
+        [Description("zlib compression level (1-9) for PNG files and uploads, 9 gives the smallest files but takes about 3 times as long as 6. PNG files are always lossless.")]
+        [DefaultValue(9)]
+        [Range(1, 9, ErrorMessage = "PNG compression level must be between 1 and 9.")]
+        int OutputFilePngCompressionLevel { get; set; }
+
+        [Description("Write a PNG with 256 colors or fewer with a palette, which is much smaller. Set to false if an application can't read these PNG files.")]
+        [DefaultValue(true)]
+        bool OutputFilePngPalette { get; set; }
+
+        [Description("When saving a screenshot, copy the path to the clipboard?")]
+        [DefaultValue(true)]
+        bool OutputFileCopyPathToClipboard { get; set; }
+
+        [Description("SaveAs Full path?")]
+        string OutputFileAsFullpath { get; set; }
+
+        [Description("JPEG file save quality in %.")]
+        [DefaultValue(80)]
+        [Range(0, 100, ErrorMessage = "JPEG quality must be between 0 and 100.")]
+        int OutputFileJpegQuality { get; set; }
+
+        [Description("Ask for the quality before saving?")]
+        [DefaultValue(false)]
+        bool OutputFilePromptQuality { get; set; }
+
+        [Description("The last number given out by ${counter.global} (${NUM} in 1.3), goes up after each saved or uploaded file which used it.")]
+        [DefaultValue(1)]
+        [NotAdministrable]
+        uint OutputFileIncrementingNumber { get; set; }
+
+        [Description("Ask for print options when printing?")]
+        [DefaultValue(true)]
+        bool OutputPrintPromptOptions { get; set; }
+
+        [Description("Allow rotating the picture for fitting on paper?")]
+        [DefaultValue(false)]
+        bool OutputPrintAllowRotate { get; set; }
+
+        [Description("Allow growing the picture for fitting on paper?")]
+        [DefaultValue(false)]
+        bool OutputPrintAllowEnlarge { get; set; }
+
+        [Description("Allow shrinking the picture for fitting on paper?")]
+        [DefaultValue(true)]
+        bool OutputPrintAllowShrink { get; set; }
+
+        [Description("Center image when printing?")]
+        [DefaultValue(true)]
+        bool OutputPrintCenter { get; set; }
+
+        [Description("Print image inverted (use e.g. for console captures)")]
+        [DefaultValue(false)]
+        bool OutputPrintInverted { get; set; }
+
+        [Description("Force grayscale printing")]
+        [DefaultValue(false)]
+        bool OutputPrintGrayscale { get; set; }
+
+        [Description("Force monochrome printing")]
+        [DefaultValue(false)]
+        bool OutputPrintMonochrome { get; set; }
+
+        [Description("Threshold for monochrome filter (0 - 255), lower value means less black")]
+        [DefaultValue(127)]
+        [Range(0, 255, ErrorMessage = "Monochrome threshold must be between 0 and 255.")]
+        byte OutputPrintMonochromeThreshold { get; set; }
+
+        [Description("Print footer on print?")]
+        [DefaultValue(true)]
+        bool OutputPrintFooter { get; set; }
+
+        [Description("Footer pattern of Greenshot 1.3, only read once to fill OutputPrintFooterTemplate; kept for going back to 1.3.")]
+        [DefaultValue("${capturetime:d\"D\"} ${capturetime:d\"T\"} - ${title}")]
+        [NotAdministrable]
+        string OutputPrintFooterPattern { get; set; }
+
+        [Description("The footer of printouts, a template like ${payload.time:D} ${payload.time:T} - ${payload.title}; see docs/vNext/variables.md.")]
+        string OutputPrintFooterTemplate { get; set; }
+
+        [Description("The wav-file to play when a capture is taken, loaded only once at the Greenshot startup")]
+        [DefaultValue("default")]
+        string NotificationSound { get; set; }
+
+        [Description("Use your global proxy?")]
+        [DefaultValue(true)]
+        [PolicyCategory(PolicyCategories.Common)]
+        bool UseProxy { get; set; }
+
+        [Description("Sets how to compare the colors for the autocrop detection, the higher the more is 'selected'. Possible values are from 0 to 255, where everything above ~150 doesn't make much sense!")]
+        [DefaultValue(10)]
+        [Range(0, 255, ErrorMessage = "AutoCropDifference must be between 0 and 255.")]
+        int AutoCropDifference { get; set; }
+
+        [Description("Replaced by AllowedPluginNames, still applied when set in greenshot-fixed.ini. Plugins by their identifier, e.g. Box Plugin.")]
+        [NotAdministrable]
+        List<string> IncludePlugins { get; set; }
+
+        [Description("Replaced by ExcludePluginNames, still applied when set in greenshot-fixed.ini. Plugins by their identifier, e.g. Box Plugin.")]
+        [NotAdministrable]
+        List<string> ExcludePlugins { get; set; }
+
+        [Description("Plugins the user switched off, by name: Box for Greenshot.Plugin.Box.dll. Set in greenshot-fixed.ini (also empty) the user can't switch plugins off.")]
+        [PolicyCategory(PolicyCategories.Common)]
+        List<string> ExcludePluginNames { get; set; }
+
+        [Description("Plugins the administrator blocked, names like ExcludePluginNames. For greenshot-fixed.ini.")]
+        [PolicyCategory(PolicyCategories.Common)]
+        List<string> BlockedPluginNames { get; set; }
+
+        [Description("When set only these plugins are loaded, every other one (also unknown ones) is blocked; set empty in greenshot-fixed.ini no plugin is loaded. Names like ExcludePluginNames. For greenshot-fixed.ini.")]
+        [PolicyCategory(PolicyCategories.Common)]
+        List<string> AllowedPluginNames { get; set; }
+
+        [Description("Destinations the user switched off. Set in greenshot-fixed.ini (also empty) the user can't switch destinations off.")]
+        [PolicyCategory(PolicyCategories.Common)]
+        List<string> ExcludeDestinations { get; set; }
+
+        [Description("Destinations the administrator blocked. For greenshot-fixed.ini.")]
+        [PolicyCategory(PolicyCategories.Common)]
+        List<string> BlockedDestinations { get; set; }
+
+        [Description("When set only these destinations are available, every other one (also unknown ones) is blocked. For greenshot-fixed.ini.")]
+        [PolicyCategory(PolicyCategories.Common)]
+        List<string> AllowedDestinations { get; set; }
+
+        [Description("SHA-256 of plugins which aren't signed like Greenshot.exe, allowed to load. The user adds them by answering the question, an administrator can list them in greenshot-fixed.ini.")]
+        [PolicyCategory(PolicyCategories.Common)]
+        List<string> PluginApprovedHashes { get; set; }
+
+        [Description("SHA-256 of plugins which aren't signed like Greenshot.exe, the user chose not to load them.")]
+        [NotAdministrable]
+        List<string> PluginRejectedHashes { get; set; }
+
+        [Description("SHA-256 of plugins whose signature was checked: valid and of the same signer as Greenshot.exe. Greenshot keeps this list itself.")]
+        [NotAdministrable]
+        List<string> PluginVerifiedHashes { get; set; }
+
+        [Description("Ask whether to load a plugin which isn't signed like Greenshot.exe. False in greenshot-fixed.ini: such a plugin only loads when PluginApprovedHashes lists it.")]
+        [DefaultValue(true)]
+        [PolicyCategory(PolicyCategories.Common)]
+        bool AskForUnsignedPlugins { get; set; }
+
+        [Description("How many days between every update check? (0=no checks)")]
+        [DefaultValue(14)]
+        [Range(0, int.MaxValue, ErrorMessage = "UpdateCheckInterval must be non-negative.")]
+        [PolicyCategory(PolicyCategories.Common)]
+        int UpdateCheckInterval { get; set; }
+
+        [Description("Last update check")]
+        [NotAdministrable]
+        DateTime LastUpdateCheck { get; set; }
+
+        [Description("Enable/disable the access to the settings, can only be changed manually in this .ini")]
+        [DefaultValue(false)]
+        [PolicyCategory(PolicyCategories.Common)]
+        bool DisableSettings { get; set; }
+
+        [Description("Enable/disable the access to the quick settings, can only be changed manually in this .ini")]
+        [DefaultValue(false)]
+        [PolicyCategory(PolicyCategories.Common)]
+        bool DisableQuickSettings { get; set; }
+
+        [DataMember(Name = "DisableTrayicon")]
+        [Description("Disable the trayicon, can only be changed manually in this .ini")]
+        [DefaultValue(false)]
+        [PolicyCategory(PolicyCategories.Common)]
+        bool HideTrayicon { get; set; }
+
+        [Description("Hide expert tab in the settings, can only be changed manually in this .ini")]
+        [DefaultValue(false)]
+        [PolicyCategory(PolicyCategories.Common)]
+        bool HideExpertSettings { get; set; }
+
+
+        [Description("Make some optimizations for usage with remote desktop")]
+        [DefaultValue(false)]
+        bool OptimizeForRDP { get; set; }
+
+        [Description("Disable all optimizations for usage with remote desktop")]
+        [DefaultValue(false)]
+        bool DisableRDPOptimizing { get; set; }
+
+        [Description("Give the unused memory back to Windows after the start, after each capture and when an editor closes. It's paged in again when it's used, which makes that use a little slower.")]
+        [DefaultValue(false)]
+        bool MinimizeWorkingSetSize { get; set; }
+
+        [Description("Draw Greenshot's windows with the graphics card (WPF hardware rendering). Off by default: WPF keeps its graphics device until Greenshot exits (about 45 MB of driver memory, after a capture window several hundred MB), and in software the capture window draws as many frames with less CPU. Takes effect after a restart.")]
+        [DefaultValue(false)]
+        bool HardwareRendering { get; set; }
+
+        [Description("Take screenshots with Windows Graphics Capture (DirectX, needed for HDR screens). False uses the GDI capture only, without a DirectX device. Video recording always uses Windows Graphics Capture.")]
+        [DefaultValue(true)]
+        bool UseGraphicsCapture { get; set; }
+
+        [Description("Create the DirectX device for the screenshots at the start and keep it, which makes every capture about 200 ms faster. False creates it for each capture and releases it afterwards (about 15-30 MB less while idle).")]
+        [DefaultValue(true)]
+        bool KeepGraphicsCaptureReady { get; set; }
+
+        [Description("Prepare the interactive capture in the background after the start, so the first capture opens faster.")]
+        [DefaultValue(true)]
+        bool PrewarmCapture { get; set; }
+
+        [Description("Prepare the editor in the background after the start (code, emoji font, installed fonts), so the first editor opens faster. False keeps this memory free until the first editor opens.")]
+        [DefaultValue(true)]
+        bool PrewarmEditor { get; set; }
+
+        [Description("The most memory in MB which the reusable buffer pools keep when they're not in use (each, for small blocks, for large buffers and for image buffers). 0 means no limit, otherwise 4 to 1024. Takes effect after a restart.")]
+        [DefaultValue(0)]
+        int BufferPoolLimit { get; set; }
+
+        [Description("Log when the UI thread doesn't respond for more than 250 ms (diagnostics, always active in debug builds).")]
+        [DefaultValue(false)]
+        bool EnableUiStallWatchdog { get; set; }
+
+        [Description("A released version also offers unstable (beta) versions as updates. An unstable version always offers newer unstable and released versions.")]
+        [DefaultValue(false)]
+        [PolicyCategory(PolicyCategories.Common)]
+        bool CheckForUnstable { get; set; }
+
+        [Description("The fixes that are active.")]
+        List<string> ActiveTitleFixes { get; set; }
+
+        [Description("The regular expressions to match the title with.")]
+        Dictionary<string, string> TitleFixMatcher { get; set; }
+
+        [Description("The replacements for the matchers.")]
+        Dictionary<string, string> TitleFixReplacer { get; set; }
+
+        [Description("A list of experimental features, this allows us to test certain features before releasing them.")]
+        List<string> ExperimentalFeatures { get; set; }
+
+        [Description("The id of the recipe which runs when the tray icon is clicked, empty for nothing. With a double-click recipe it runs after the double-click time of Windows.")]
+        [DefaultValue("recipe_tray_menu")]
+        string TrayClickRecipe { get; set; }
+
+        [Description("The id of the recipe which runs when the tray icon is double-clicked, empty for nothing")]
+        [DefaultValue("recipe_open_capture_folder")]
+        string TrayDoubleClickRecipe { get; set; }
+
+        [Description("Sets if the zoomer is enabled")]
+        [DefaultValue(true)]
+        bool ZoomerEnabled { get; set; }
+
+        [Description("Sets if the screen is frozen while a region or window is selected. When false the screen stays live and only the selection is captured, when it is made (Windows 10 2004 or newer, else the screen is frozen).")]
+        [DefaultValue(true)]
+        bool CaptureFreezeScreen { get; set; }
+
+        [Description("Ignore the screen reader flag of Windows. When false, while the flag is on, the selection starts on the frozen screen and a region capture starts as window capture. Programs can leave the flag on after the screen reader is gone, true then captures as without a screen reader.")]
+        [DefaultValue(false)]
+        bool IgnoreScreenReader { get; set; }
+
+        [Description("Read the text the applications show in a capture of the screen through UI Automation (exact text and link targets for the text selection, OCR and plugins); OCR adds the text in the rest of the capture. False uses only OCR.")]
+        [DefaultValue(true)]
+        bool ReadApplicationText { get; set; }
+
+        [Description("Sets if the keys are shown (help panel) in the interactive capture, F1 shows or hides them")]
+        [DefaultValue(true)]
+        bool CaptureHelpVisible { get; set; }
+
+        [Description("Sets if the info panel (screen, selection, window and mouse position) is shown in the interactive capture, I shows or hides it")]
+        [DefaultValue(true)]
+        bool CaptureInfoVisible { get; set; }
+
+        [Description("Sets if the preview of the selection (enlarged when small, reduced when large) is shown in the interactive capture, P shows or hides it")]
+        [DefaultValue(true)]
+        bool CaptureSelectionPreviewVisible { get; set; }
+
+        [Description("Sets if the preview of the selection is shown in the place of the zoomer (next to the cursor) instead of in a corner, P switches between a corner, the zoomer's place and off")]
+        [DefaultValue(false)]
+        bool ZoomerShowsPreview { get; set; }
+
+        [Description("Specify the transparency for the zoomer, from 0-1 (where 1 is no transparency and 0 is complete transparent. An useful setting would be 0.7)")]
+        [DefaultValue(1)]
+        float ZoomerOpacity { get; set; }
+
+        [Description("Maximum length of submenu items in the context menu, making this longer might cause context menu issues on dual screen systems.")]
+        [DefaultValue(25)]
+        [Range(1, int.MaxValue, ErrorMessage = "MaxMenuItemLength must be at least 1.")]
+        int MaxMenuItemLength { get; set; }
+
+        [Description("The 'to' field for the email destination (settings for Outlook can be found under the Office section)")]
+        [DefaultValue("")]
+        string MailApiTo { get; set; }
+
+        [Description("The 'CC' field for the email destination (settings for Outlook can be found under the Office section)")]
+        [DefaultValue("")]
+        string MailApiCC { get; set; }
+
+        [Description("The 'BCC' field for the email destination (settings for Outlook can be found under the Office section)")]
+        [DefaultValue("")]
+        string MailApiBCC { get; set; }
+
+        [Description("Version of Greenshot which created this .ini")]
+        [NotAdministrable]
+        string LastSaveWithVersion { get; }
+
+        /// <summary>
+        /// The version of Greenshot which saved greenshot.ini before this start (LastSaveWithVersion as it was loaded), use this for upgrade checks.
+        /// LastSaveWithVersion changes with every save, and plugins add their sections (running IAfterLoad) after the file was loaded,
+        /// possibly after an auto-save.
+        /// </summary>
+        [IniValue(RuntimeOnly = true)]
+        string LoadedWithVersion { get; set; }
+
+        [Description("When reading images from files or clipboard, use the EXIF information to correct the orientation")]
+        [DefaultValue(true)]
+        bool ProcessEXIFOrientation { get; set; }
+
+        [Description("Which details are written into exported images, the program name and resolution are always written. Options: CaptureTime (when the screen was captured), Author (ExportMetadataAuthor and ExportMetadataCopyright), and the private ones Source (window title, web address), Text (text OCR found), Barcodes (content of barcodes and QR codes). Private details are written into saved files; before they leave the computer (upload, e-mail, Office) Greenshot asks, a flow without a window removes them. Empty: none of them.")]
+        [DefaultValue("CaptureTime")]
+        List<ExportMetadataField> ExportMetadata { get; set; }
+
+        [Description("The author written into exported images when ExportMetadata contains Author")]
+        [PolicyCategory(PolicyCategories.Common)]
+        string ExportMetadataAuthor { get; set; }
+
+        [Description("The copyright notice written into exported images when ExportMetadata contains Author")]
+        [PolicyCategory(PolicyCategories.Common)]
+        string ExportMetadataCopyright { get; set; }
+
+        [Description("The last used region, for reuse in the capture last region")]
+        [NotAdministrable]
+        NativeRect LastCapturedRegion { get; set; }
+
+        [Description("The sizes of the fixed size capture (F in the region selection), width x height separated by commas. Optionally with a place: 1280x720+100+200 is 100, 200 from the top left of the main monitor, 1280x720+100+200@1920+0 of the monitor at 1920, 0, 1280x720+10+40@notepad.exe of the content of a window of notepad.exe")]
+        [DefaultValue("640x480,800x600,1024x768,1280x720,1920x1080")]
+        List<string> FixedCaptureSizes { get; set; }
+
+        [Description("The sizes and places of the last region captures (e.g. 1280x720+100+200@1920+0), the fixed size capture offers them below its own sizes")]
+        [NotAdministrable]
+        List<string> RecentCaptureAreas { get; set; }
+
+        [Description("The size and place of the last fixed size capture (e.g. 1280x720+100+200), the fixed size capture starts with it")]
+        string FixedCaptureArea { get; set; }
+
+        [Description("What the fixed size capture remembers of the last region captures: Size, Screen (also the place on the monitor) or Window (also the place in the window of the program, else on the monitor)")]
+        [DefaultValue("Window")]
+        FixedCaptureRemember FixedCaptureRemembers { get; set; }
+
+        [Description("Picking a size with a place in the fixed size capture moves the mouse so the area is there; false: the place is only shown, the area snaps onto it")]
+        [DefaultValue(true)]
+        bool FixedCaptureMovesCursor { get; set; }
+
+        [Description("Where the cursor holds the area of the fixed size capture: TopLeft, TopRight, BottomRight, BottomLeft or Center, C changes it")]
+        [DefaultValue("TopLeft")]
+        FixedCaptureAnchor FixedCaptureAnchor { get; set; }
+
+        [DataMember(Name = "BaseIconSize")]
+        [Description("Defines the base size of the icons (e.g. for the buttons in the editor and the menus) at 100%, in steps of 4, default value 16,16. It's scaled to the DPI of the display the menu or window is on")]
+        [DefaultValue("16,16")]
+        NativeSize IconSize { get; set; }
+
+        [Description("The colors of Greenshot's windows and menus: System (follow the Windows settings), Light or Dark. A high contrast theme of Windows always wins.")]
+        [DefaultValue("System")]
+        UiTheme Theme { get; set; }
+
+        [Description("List of hostnames or domain patterns (e.g. jira.internal, *.mycompany.local) for which SSL/TLS certificate validation errors are ignored.")]
+        List<string> AllowedUntrustedCertificateHosts { get; set; }
+
+        [Description("List of certificate thumbprints (SHA-1 / SHA-256 hashes) for which SSL/TLS certificate validation errors are ignored.")]
+        List<string> AllowedCertificateThumbprints { get; set; }
+
+        [Description("Let AI tools use Greenshot through greenshot-mcp (opt-in). When false, every greenshot-mcp request is refused without asking. Lock it with greenshot-fixed.ini.")]
+        [DefaultValue(false)]
+        [PolicyCategory(PolicyCategories.Common)]
+        bool AiToolsEnabled { get; set; }
+
+        [Description("Let allowed AI tools propose new or changed recipes (each one is still shown for approval).")]
+        [DefaultValue(true)]
+        [PolicyCategory(PolicyCategories.Common)]
+        bool AiToolsAllowRecipeProposals { get; set; }
+
+        [Description("Programs (full paths) which the user allowed to list windows, take screenshots and run recipes through greenshot-mcp. Greenshot asks the first time a program connects.")]
+        List<string> AiToolsAllowedClients { get; set; }
+
+        [Description("Additional locations of greenshot-mcp.exe (the file or its directory) which may connect, besides Greenshot's own directory; only used by Debug builds.")]
+        List<string> AiToolsMcpServerPaths { get; set; }
+
+        [Description("Processes whose windows are never listed or captured for AI tools (process names without .exe).")]
+        [DefaultValue("KeePass,KeePassXC,1Password,Bitwarden,LastPass,Dashlane,Enpass,RoboForm,NordPass,ProtonPass")]
+        List<string> AiToolsExcludedProcesses { get; set; }
+
+        [Description("Show a notification every time an AI tool takes a screenshot with Greenshot.")]
+        [DefaultValue(true)]
+        bool AiToolsNotifyOnCapture { get; set; }
+
+        /// <summary>Sets the default output folder when <see cref="OutputDirectory"/> is empty. A configured folder which doesn't exist stays.</summary>
+        void ValidateAndCorrectOutputDirectory();
+
+        /// <summary>
+        /// The folder for a new screenshot: <see cref="OutputDirectory"/> rendered for the capture, created when it doesn't exist.
+        /// When it can't be used, the default output folder for this save only, <paramref name="problem"/> tells why.
+        /// </summary>
+        /// <param name="scope">What the template can use, e.g. the time of the capture; null for none</param>
+        /// <param name="problem">Why the configured folder couldn't be used, null when it is used</param>
+        string GetOutputDirectory(Greenshot.Base.Expressions.VariableScope scope, out string problem);
+
+        /// <summary>Validates <see cref="OutputFileAsFullpath"/>; resets it to a default full-path dummy when the directory no longer exists.</summary>
+        void ValidateAndCorrectOutputFileAsFullpath();
+    }
+}

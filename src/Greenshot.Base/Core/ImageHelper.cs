@@ -1,13 +1,13 @@
-﻿/*
+/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  *
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
@@ -20,10 +20,13 @@
  */
 
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -32,8 +35,9 @@ using Dapplo.Windows.Common.Structs;
 using Dapplo.Windows.Gdi32;
 using Greenshot.Base.Core.Enums;
 using Greenshot.Base.Effects;
-using Greenshot.Base.IniFile;
+using Greenshot.ImageSharpDrawing;
 using log4net;
+using SixLabors.ImageSharp.PixelFormats;
 using Brush = System.Drawing.Brush;
 using Color = System.Drawing.Color;
 using Matrix = System.Drawing.Drawing2D.Matrix;
@@ -48,72 +52,6 @@ namespace Greenshot.Base.Core
     public static class ImageHelper
     {
         private static readonly ILog Log = LogManager.GetLogger(typeof(ImageHelper));
-        private static readonly CoreConfiguration CoreConfig = IniConfig.GetIniSection<CoreConfiguration>();
-        private const int ExifOrientationId = 0x0112;
-
-
-        /// <summary>
-        /// Make sure the image is orientated correctly
-        /// </summary>
-        /// <param name="image"></param>
-        public static void Orientate(Image image)
-        {
-            if (!CoreConfig.ProcessEXIFOrientation)
-            {
-                return;
-            }
-
-            try
-            {
-                // Get the index of the orientation property.
-                int orientationIndex = Array.IndexOf(image.PropertyIdList, ExifOrientationId);
-                // If there is no such property, return Unknown.
-                if (orientationIndex < 0)
-                {
-                    return;
-                }
-
-                PropertyItem item = image.GetPropertyItem(ExifOrientationId);
-
-                ExifOrientations orientation = (ExifOrientations) item.Value[0];
-                // Orient the image.
-                switch (orientation)
-                {
-                    case ExifOrientations.Unknown:
-                    case ExifOrientations.TopLeft:
-                        break;
-                    case ExifOrientations.TopRight:
-                        image.RotateFlip(RotateFlipType.RotateNoneFlipX);
-                        break;
-                    case ExifOrientations.BottomRight:
-                        image.RotateFlip(RotateFlipType.Rotate180FlipNone);
-                        break;
-                    case ExifOrientations.BottomLeft:
-                        image.RotateFlip(RotateFlipType.RotateNoneFlipY);
-                        break;
-                    case ExifOrientations.LeftTop:
-                        image.RotateFlip(RotateFlipType.Rotate90FlipX);
-                        break;
-                    case ExifOrientations.RightTop:
-                        image.RotateFlip(RotateFlipType.Rotate90FlipNone);
-                        break;
-                    case ExifOrientations.RightBottom:
-                        image.RotateFlip(RotateFlipType.Rotate90FlipY);
-                        break;
-                    case ExifOrientations.LeftBottom:
-                        image.RotateFlip(RotateFlipType.Rotate270FlipNone);
-                        break;
-                }
-
-                // Set the orientation to be normal, as we rotated the image.
-                item.Value[0] = (byte) ExifOrientations.TopLeft;
-                image.SetPropertyItem(item);
-            }
-            catch (Exception orientEx)
-            {
-                Log.Warn("Problem orientating the image: ", orientEx);
-            }
-        }
 
         /// <summary>
         /// Create a Thumbnail
@@ -188,109 +126,72 @@ namespace Greenshot.Base.Core
         }
 
         /// <summary>
-        /// Private helper method for the FindAutoCropNativeRect
+        /// Find the content in the area: every pixel which differs more than cropDifference from the reference color.
+        /// With cropDifference 0 only the exact reference color is cropped away.
         /// </summary>
-        /// <param name="fastBitmap">IFastBitmap</param>
-        /// <param name="colorPoint">NativePoint</param>
-        /// <param name="cropDifference">int</param>
-        /// <param name="area">NativeRect with optional area to scan in</param>
-        /// <returns>NativeRect</returns>
-        private static NativeRect FindAutoCropNativeRect(IFastBitmap fastBitmap, NativePoint colorPoint, int cropDifference, NativeRect? area = null)
+        /// <param name="pixels">BitmapPixelAccessor</param>
+        /// <param name="referenceColor">Bgra32 with the color to crop away</param>
+        /// <param name="cropDifference">int, the allowed difference per channel (average of R, G and B)</param>
+        /// <param name="area">NativeRect with the area to scan in</param>
+        /// <returns>NativeRect with the content, empty if there is nothing to crop</returns>
+        private static NativeRect FindAutoCropNativeRect(BitmapPixelAccessor<Bgra32> pixels, Bgra32 referenceColor, int cropDifference, NativeRect area)
         {
-            area ??= new NativeRect(0, 0, fastBitmap.Width, fastBitmap.Height);
-            NativeRect cropNativeRect = NativeRect.Empty;
-            Color referenceColor = fastBitmap.GetColorAt(colorPoint.X, colorPoint.Y);
-            NativePoint min = new NativePoint(int.MaxValue, int.MaxValue);
-            NativePoint max = new NativePoint(int.MinValue, int.MinValue);
-
-            if (cropDifference > 0)
+            int left = int.MaxValue, top = int.MaxValue, right = int.MinValue, bottom = int.MinValue;
+            for (int y = area.Top; y < area.Bottom; y++)
             {
-                for (int y = area.Value.Top; y < area.Value.Bottom; y++)
+                var row = pixels.GetRowSpan(y);
+                for (int x = area.Left; x < area.Right; x++)
                 {
-                    for (int x = area.Value.Left; x < area.Value.Right; x++)
+                    Bgra32 color = row[x];
+                    int difference = (Math.Abs(color.R - referenceColor.R) + Math.Abs(color.G - referenceColor.G) + Math.Abs(color.B - referenceColor.B)) / 3;
+                    if (difference <= cropDifference && Math.Abs(color.A - referenceColor.A) <= cropDifference)
                     {
-                        Color currentColor = fastBitmap.GetColorAt(x, y);
-                        int diffR = Math.Abs(currentColor.R - referenceColor.R);
-                        int diffG = Math.Abs(currentColor.G - referenceColor.G);
-                        int diffB = Math.Abs(currentColor.B - referenceColor.B);
-                        if ((diffR + diffG + diffB) / 3 <= cropDifference)
-                        {
-                            continue;
-                        }
-
-                        if (x < min.X) min = min.ChangeX(x);
-                        if (y < min.Y) min = min.ChangeY(y);
-                        if (x > max.X) max = max.ChangeX(x);
-                        if (y > max.Y) max = max.ChangeY(y);
+                        continue;
                     }
+
+                    left = Math.Min(left, x);
+                    right = Math.Max(right, x);
+                    top = Math.Min(top, y);
+                    bottom = Math.Max(bottom, y);
                 }
             }
-            else
+
+            if (left == int.MaxValue)
             {
-                for (int y = area.Value.Top; y < area.Value.Bottom; y++)
-                {
-                    for (int x = area.Value.Left; x < area.Value.Right; x++)
-                    {
-                        Color currentColor = fastBitmap.GetColorAt(x, y);
-                        if (!referenceColor.Equals(currentColor))
-                        {
-                            continue;
-                        }
-
-                        if (x < min.X) min = min.ChangeX(x);
-                        if (y < min.Y) min = min.ChangeY(y);
-                        if (x > max.X) max = max.ChangeX(x);
-                        if (y > max.Y) max = max.ChangeY(y);
-                    }
-                }
+                // Only the reference color
+                return NativeRect.Empty;
             }
 
-            if (!(NativePoint.Empty.Equals(min) && max.Equals(new NativePoint(area.Value.Width - 1, area.Value.Height - 1))))
-            {
-                if (!(min.X == int.MaxValue || min.Y == int.MaxValue || max.X == int.MinValue || min.X == int.MinValue))
-                {
-                    cropNativeRect = new NativeRect(min.X, min.Y, max.X - min.X + 1, max.Y - min.Y + 1);
-                }
-            }
-
-            return cropNativeRect;
+            var content = new NativeRect(left, top, right - left + 1, bottom - top + 1);
+            return content == area ? NativeRect.Empty : content;
         }
 
         /// <summary>
-        /// Get a NativeRect for the image which crops the image of all colors equal to that on 0,0
+        /// Get the content of the image, cropping away the color of one of the corners (the one which crops the least)
         /// </summary>
         /// <param name="image">Image</param>
-        /// <param name="cropDifference">int</param>
+        /// <param name="cropDifference">int, 0 crops only the exact color of the corner</param>
         /// <param name="area">NativeRect with optional area</param>
-        /// <returns>NativeRect</returns>
+        /// <returns>NativeRect, empty if there is nothing to crop</returns>
         public static NativeRect FindAutoCropRectangle(Image image, int cropDifference, NativeRect? area = null)
         {
-            area ??= new NativeRect(0, 0, image.Width, image.Height);
+            var scanArea = area ?? new NativeRect(0, 0, image.Width, image.Height);
             NativeRect cropNativeRect = NativeRect.Empty;
-            var checkPoints = new List<NativePoint>
+            BitmapPixels.ProcessPixelRows<Bgra32>((Bitmap) image, pixels =>
             {
-                new(area.Value.Left, area.Value.Top),
-                new(area.Value.Left, area.Value.Bottom - 1),
-                new(area.Value.Right - 1, area.Value.Top),
-                new(area.Value.Right - 1, area.Value.Bottom - 1)
-            };
-
-            // Top Left
-            // Bottom Left
-            // Top Right
-            // Bottom Right
-            using (IFastBitmap fastBitmap = FastBitmap.Create((Bitmap) image))
-            {
-                // find biggest area
-                foreach (var checkPoint in checkPoints)
+                var top = pixels.GetRowSpan(scanArea.Top);
+                var bottom = pixels.GetRowSpan(scanArea.Bottom - 1);
+                Bgra32[] corners = { top[scanArea.Left], top[scanArea.Right - 1], bottom[scanArea.Left], bottom[scanArea.Right - 1] };
+                // Corners with the same color give the same result
+                foreach (var corner in corners.Distinct())
                 {
-                    var currentNativeRect = FindAutoCropNativeRect(fastBitmap, checkPoint, cropDifference, area);
+                    var currentNativeRect = FindAutoCropNativeRect(pixels, corner, cropDifference, scanArea);
                     if (currentNativeRect.Width * currentNativeRect.Height > cropNativeRect.Width * cropNativeRect.Height)
                     {
                         cropNativeRect = currentNativeRect;
                     }
                 }
-            }
+            }, ImageLockMode.ReadOnly);
 
             return cropNativeRect;
         }
@@ -356,6 +257,113 @@ namespace Greenshot.Base.Core
         }
 
         /// <summary>
+        /// The outline of what stays of an image with torn edges (see CreateTornEdge): the same seed gives the same teeth, e.g. for the HDR image
+        /// </summary>
+        /// <param name="width">The width of the image</param>
+        /// <param name="height">The height of the image</param>
+        /// <param name="toothHeight">How large (height) is each tooth</param>
+        /// <param name="horizontalToothRange">How wide is a horizontal tooth</param>
+        /// <param name="verticalToothRange">How wide is a vertical tooth</param>
+        /// <param name="edges">Which edges are torn, clockwise: 0=top,1=right,2=bottom,3=left</param>
+        /// <param name="seed">The seed of the teeth, null for random ones</param>
+        public static List<NativePoint> CreateTornEdgeOutline(int width, int height, int toothHeight, int horizontalToothRange, int verticalToothRange, bool[] edges, int? seed = null)
+        {
+            Random random = seed.HasValue ? new Random(seed.Value) : new Random();
+            int horizontalRegions = (int) Math.Round((float) width / horizontalToothRange);
+            int verticalRegions = (int) Math.Round((float) height / verticalToothRange);
+
+            var topLeft = new NativePoint(0, 0);
+            var topRight = new NativePoint(width, 0);
+            var bottomLeft = new NativePoint(0, height);
+            var bottomRight = new NativePoint(width, height);
+
+            var points = new List<NativePoint>();
+
+            if (edges[0])
+            {
+                // calculate starting point only if the left edge is torn
+                if (!edges[3])
+                {
+                    points.Add(topLeft);
+                }
+                else
+                {
+                    points.Add(new NativePoint(random.Next(1, toothHeight), random.Next(1, toothHeight)));
+                }
+
+                for (int i = 1; i < horizontalRegions - 1; i++)
+                {
+                    points.Add(new NativePoint(i * horizontalToothRange, random.Next(1, toothHeight)));
+                }
+
+                points.Add(new NativePoint(width - random.Next(1, toothHeight), random.Next(1, toothHeight)));
+            }
+            else
+            {
+                // set start & endpoint to be the default "whole-line"
+                points.Add(topLeft);
+                points.Add(topRight);
+            }
+
+            // Right
+            if (edges[1])
+            {
+                for (int i = 1; i < verticalRegions - 1; i++)
+                {
+                    points.Add(new NativePoint(width - random.Next(1, toothHeight), i * verticalToothRange));
+                }
+
+                points.Add(new NativePoint(width - random.Next(1, toothHeight), height - random.Next(1, toothHeight)));
+            }
+            else
+            {
+                // correct previous ending point
+                points[points.Count - 1] = topRight;
+                // set endpoint to be the default "whole-line"
+                points.Add(bottomRight);
+            }
+
+            // Bottom
+            if (edges[2])
+            {
+                for (int i = 1; i < horizontalRegions - 1; i++)
+                {
+                    points.Add(new NativePoint(width - i * horizontalToothRange, height - random.Next(1, toothHeight)));
+                }
+
+                points.Add(new NativePoint(random.Next(1, toothHeight), height - random.Next(1, toothHeight)));
+            }
+            else
+            {
+                // correct previous ending point
+                points[points.Count - 1] = bottomRight;
+                // set endpoint to be the default "whole-line"
+                points.Add(bottomLeft);
+            }
+
+            // Left
+            if (edges[3])
+            {
+                // One fewer as the end point is the starting point
+                for (int i = 1; i < verticalRegions - 1; i++)
+                {
+                    points.Add(new NativePoint(random.Next(1, toothHeight), points[points.Count - 1].Y - verticalToothRange));
+                }
+            }
+            else
+            {
+                // correct previous ending point
+                points[points.Count - 1] = bottomLeft;
+                // set endpoint to be the default "whole-line"
+                points.Add(topLeft);
+            }
+
+            // End point always is the starting point
+            points[points.Count - 1] = points[0];
+            return points;
+        }
+
+        /// <summary>
         /// Make the picture look like it's torn
         /// </summary>
         /// <param name="sourceImage">Bitmap to make torn edge off</param>
@@ -364,103 +372,12 @@ namespace Greenshot.Base.Core
         /// <param name="verticalToothRange">How wide is a vertical tooth</param>
         /// <param name="edges">bool[] with information on if the edge needs torn or not. Order is clockwise: 0=top,1=right,2=bottom,3=left</param>
         /// <returns>Changed bitmap</returns>
-        public static Image CreateTornEdge(Image sourceImage, int toothHeight, int horizontalToothRange, int verticalToothRange, bool[] edges)
+        public static Image CreateTornEdge(Image sourceImage, int toothHeight, int horizontalToothRange, int verticalToothRange, bool[] edges, int? seed = null)
         {
             Image returnImage = CreateEmpty(sourceImage.Width, sourceImage.Height, PixelFormat.Format32bppArgb, Color.Empty, sourceImage.HorizontalResolution, sourceImage.VerticalResolution);
             using (var path = new GraphicsPath())
             {
-                Random random = new Random();
-                int horizontalRegions = (int) Math.Round((float) sourceImage.Width / horizontalToothRange);
-                int verticalRegions = (int) Math.Round((float) sourceImage.Height / verticalToothRange);
-
-                var topLeft = new NativePoint(0, 0);
-                var topRight = new NativePoint(sourceImage.Width, 0);
-                var bottomLeft = new NativePoint(0, sourceImage.Height);
-                var bottomRight = new NativePoint(sourceImage.Width, sourceImage.Height);
-
-                var points = new List<NativePoint>();
-
-                if (edges[0])
-                {
-                    // calculate starting point only if the left edge is torn
-                    if (!edges[3])
-                    {
-                        points.Add(topLeft);
-                    }
-                    else
-                    {
-                        points.Add(new NativePoint(random.Next(1, toothHeight), random.Next(1, toothHeight)));
-                    }
-
-                    for (int i = 1; i < horizontalRegions - 1; i++)
-                    {
-                        points.Add(new NativePoint(i * horizontalToothRange, random.Next(1, toothHeight)));
-                    }
-
-                    points.Add(new NativePoint(sourceImage.Width - random.Next(1, toothHeight), random.Next(1, toothHeight)));
-                }
-                else
-                {
-                    // set start & endpoint to be the default "whole-line"
-                    points.Add(topLeft);
-                    points.Add(topRight);
-                }
-
-                // Right
-                if (edges[1])
-                {
-                    for (int i = 1; i < verticalRegions - 1; i++)
-                    {
-                        points.Add(new NativePoint(sourceImage.Width - random.Next(1, toothHeight), i * verticalToothRange));
-                    }
-
-                    points.Add(new NativePoint(sourceImage.Width - random.Next(1, toothHeight), sourceImage.Height - random.Next(1, toothHeight)));
-                }
-                else
-                {
-                    // correct previous ending point
-                    points[points.Count - 1] = topRight;
-                    // set endpoint to be the default "whole-line"
-                    points.Add(bottomRight);
-                }
-
-                // Bottom
-                if (edges[2])
-                {
-                    for (int i = 1; i < horizontalRegions - 1; i++)
-                    {
-                        points.Add(new NativePoint(sourceImage.Width - i * horizontalToothRange, sourceImage.Height - random.Next(1, toothHeight)));
-                    }
-
-                    points.Add(new NativePoint(random.Next(1, toothHeight), sourceImage.Height - random.Next(1, toothHeight)));
-                }
-                else
-                {
-                    // correct previous ending point
-                    points[points.Count - 1] = bottomRight;
-                    // set endpoint to be the default "whole-line"
-                    points.Add(bottomLeft);
-                }
-
-                // Left
-                if (edges[3])
-                {
-                    // One fewer as the end point is the starting point
-                    for (int i = 1; i < verticalRegions - 1; i++)
-                    {
-                        points.Add(new NativePoint(random.Next(1, toothHeight), points[points.Count - 1].Y - verticalToothRange));
-                    }
-                }
-                else
-                {
-                    // correct previous ending point
-                    points[points.Count - 1] = bottomLeft;
-                    // set endpoint to be the default "whole-line"
-                    points.Add(topLeft);
-                }
-
-                // End point always is the starting point
-                points[points.Count - 1] = points[0];
+                var points = CreateTornEdgeOutline(sourceImage.Width, sourceImage.Height, toothHeight, horizontalToothRange, verticalToothRange, edges, seed);
 
                 DrawLines(path, points);
 
@@ -483,21 +400,9 @@ namespace Greenshot.Base.Core
         /// <summary>
         /// Apply BoxBlur to the destinationBitmap
         /// </summary>
-        /// <param name="destinationBitmap">Bitmap to blur</param>
+        /// <param name="destinationBitmap">Bitmap to blur, with alpha it should be Format32bppPArgb (otherwise the color of transparent pixels bleeds into the visible ones)</param>
         /// <param name="range">Must be ODD!</param>
         public static void ApplyBoxBlur(Bitmap destinationBitmap, int range)
-        {
-            // We only need one fastbitmap as we use it as source and target (the reading is done for one line H/V, writing after "parsing" one line H/V)
-            using IFastBitmap fastBitmap = FastBitmap.Create(destinationBitmap);
-            ApplyBoxBlur(fastBitmap, range);
-        }
-
-        /// <summary>
-        /// Apply BoxBlur to the fastBitmap
-        /// </summary>
-        /// <param name="fastBitmap">IFastBitmap to blur</param>
-        /// <param name="range">Must be ODD!</param>
-        public static void ApplyBoxBlur(IFastBitmap fastBitmap, int range)
         {
             // Range must be odd!
             if ((range & 1) == 0)
@@ -512,258 +417,141 @@ namespace Greenshot.Base.Core
 
             // Box blurs are frequently used to approximate a Gaussian blur.
             // By the central limit theorem, if applied 3 times on the same image, a box blur approximates the Gaussian kernel to within about 3%, yielding the same result as a quadratic convolution kernel.
-            // This might be true, but the GDI+ BlurEffect doesn't look the same, a 2x blur is more simular and we only make 2x Box-Blur.
+            // This might be true, but the GDI+ BlurEffect doesn't look the same, a 2x blur is more similar and we only make 2x Box-Blur.
             // (Might also be a mistake in our blur, but for now it looks great)
-            if (fastBitmap.HasAlphaChannel)
+            // Every byte of a pixel is blurred, that keeps the inner loops free of a loop over the channels.
+            if (destinationBitmap.PixelFormat == PixelFormat.Format24bppRgb)
             {
-                BoxBlurHorizontalAlpha(fastBitmap, range);
-                BoxBlurVerticalAlpha(fastBitmap, range);
-                BoxBlurHorizontalAlpha(fastBitmap, range);
-                BoxBlurVerticalAlpha(fastBitmap, range);
+                BitmapPixels.ProcessPixelRows<Bgr24>(destinationBitmap, pixels => BoxBlur(pixels, 3, range));
             }
             else
             {
-                BoxBlurHorizontal(fastBitmap, range);
-                BoxBlurVertical(fastBitmap, range);
-                BoxBlurHorizontal(fastBitmap, range);
-                BoxBlurVertical(fastBitmap, range);
+                BitmapPixels.ProcessPixelRows<Bgra32>(destinationBitmap, pixels => BoxBlur(pixels, 4, range));
+            }
+        }
+
+        private static void BoxBlur<TPixel>(BitmapPixelAccessor<TPixel> pixels, int bytesPerPixel, int range) where TPixel : unmanaged
+        {
+            BoxBlurHorizontal(pixels, bytesPerPixel, range);
+            BoxBlurVertical(pixels, bytesPerPixel, range);
+            BoxBlurHorizontal(pixels, bytesPerPixel, range);
+            BoxBlurVertical(pixels, bytesPerPixel, range);
+        }
+
+        /// <summary>
+        /// Horizontal box blur pass: every byte becomes the average of the same byte of the pixels within range / 2 left and right of it
+        /// (only those inside the row). The row is copied first, so the sliding sums use the original values; the bytes of a pixel are done one after the other.
+        /// </summary>
+        private static void BoxBlurHorizontal<TPixel>(BitmapPixelAccessor<TPixel> pixels, int bytesPerPixel, int range) where TPixel : unmanaged
+        {
+            int halfRange = range / 2;
+            int width = pixels.Width;
+            int height = pixels.Height;
+            int rowBytes = width * bytesPerPixel;
+            byte[] original = ArrayPool<byte>.Shared.Rent(rowBytes);
+            try
+            {
+                for (int y = 0; y < height; y++)
+                {
+                    var row = MemoryMarshal.AsBytes(pixels.GetRowSpan(y));
+                    row.CopyTo(original);
+                    for (int channel = 0; channel < bytesPerPixel; channel++)
+                    {
+                        int sum = 0;
+                        int hits = 0;
+                        for (int x = -halfRange; x < width; x++)
+                        {
+                            int oldPixel = x - halfRange - 1;
+                            if (oldPixel >= 0)
+                            {
+                                sum -= original[oldPixel * bytesPerPixel + channel];
+                                hits--;
+                            }
+
+                            int newPixel = x + halfRange;
+                            if (newPixel < width)
+                            {
+                                sum += original[newPixel * bytesPerPixel + channel];
+                                hits++;
+                            }
+
+                            if (x >= 0)
+                            {
+                                row[x * bytesPerPixel + channel] = (byte)(sum / hits);
+                            }
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(original);
             }
         }
 
         /// <summary>
-        /// BoxBlurHorizontal is a private helper method for the BoxBlur
+        /// Vertical box blur pass, like <see cref="BoxBlurHorizontal"/> but with rows: it sweeps the rows in memory order with a sum per byte of a row,
+        /// instead of walking down every column. A row is written as soon as its average is known, so the last range / 2 + 1 original rows
+        /// are kept in a ring buffer for subtracting them from the sums later.
         /// </summary>
-        /// <param name="targetFastBitmap">Target BitmapBuffer</param>
-        /// <param name="range">Range must be odd!</param>
-        private static void BoxBlurHorizontal(IFastBitmap targetFastBitmap, int range)
+        private static void BoxBlurVertical<TPixel>(BitmapPixelAccessor<TPixel> pixels, int bytesPerPixel, int range) where TPixel : unmanaged
         {
-            if (targetFastBitmap.HasAlphaChannel)
-            {
-                throw new NotSupportedException("BoxBlurHorizontal should NOT be called for bitmaps with alpha channel");
-            }
-
             int halfRange = range / 2;
-            Color[] newColors = new Color[targetFastBitmap.Width];
-            byte[] tmpColor = new byte[3];
-            for (int y = targetFastBitmap.Top; y < targetFastBitmap.Bottom; y++)
+            int height = pixels.Height;
+            int rowBytes = pixels.Width * bytesPerPixel;
+            int ringRows = halfRange + 1;
+            int[] sums = ArrayPool<int>.Shared.Rent(rowBytes);
+            byte[] ring = ArrayPool<byte>.Shared.Rent(ringRows * rowBytes);
+            try
             {
+                Array.Clear(sums, 0, rowBytes);
                 int hits = 0;
-                int r = 0;
-                int g = 0;
-                int b = 0;
-                for (int x = targetFastBitmap.Left - halfRange; x < targetFastBitmap.Right; x++)
+                for (int y = -halfRange; y < height; y++)
                 {
-                    int oldPixel = x - halfRange - 1;
-                    if (oldPixel >= targetFastBitmap.Left)
+                    int oldRow = y - halfRange - 1;
+                    if (oldRow >= 0)
                     {
-                        targetFastBitmap.GetColorAt(oldPixel, y, tmpColor);
-                        r -= tmpColor[FastBitmap.ColorIndexR];
-                        g -= tmpColor[FastBitmap.ColorIndexG];
-                        b -= tmpColor[FastBitmap.ColorIndexB];
+                        var original = new ReadOnlySpan<byte>(ring, oldRow % ringRows * rowBytes, rowBytes);
+                        for (int i = 0; i < rowBytes; i++)
+                        {
+                            sums[i] -= original[i];
+                        }
                         hits--;
                     }
 
-                    int newPixel = x + halfRange;
-                    if (newPixel < targetFastBitmap.Right)
+                    // Rows below y are not written yet, so they still have their original values
+                    int newRow = y + halfRange;
+                    if (newRow < height)
                     {
-                        targetFastBitmap.GetColorAt(newPixel, y, tmpColor);
-                        r += tmpColor[FastBitmap.ColorIndexR];
-                        g += tmpColor[FastBitmap.ColorIndexG];
-                        b += tmpColor[FastBitmap.ColorIndexB];
+                        var added = MemoryMarshal.AsBytes(pixels.GetRowSpan(newRow));
+                        for (int i = 0; i < rowBytes; i++)
+                        {
+                            sums[i] += added[i];
+                        }
                         hits++;
                     }
 
-                    if (x >= targetFastBitmap.Left)
+                    if (y >= 0)
                     {
-                        newColors[x - targetFastBitmap.Left] = Color.FromArgb(255, (byte) (r / hits), (byte) (g / hits), (byte) (b / hits));
+                        var row = MemoryMarshal.AsBytes(pixels.GetRowSpan(y));
+                        row.CopyTo(new Span<byte>(ring, y % ringRows * rowBytes, rowBytes));
+                        for (int i = 0; i < rowBytes; i++)
+                        {
+                            row[i] = (byte)(sums[i] / hits);
+                        }
                     }
-                }
-
-                for (int x = targetFastBitmap.Left; x < targetFastBitmap.Right; x++)
-                {
-                    targetFastBitmap.SetColorAt(x, y, newColors[x - targetFastBitmap.Left]);
                 }
             }
-        }
-
-        /// <summary>
-        /// BoxBlurHorizontal is a private helper method for the BoxBlur, only for IFastBitmaps with alpha channel
-        /// </summary>
-        /// <param name="targetFastBitmap">Target BitmapBuffer</param>
-        /// <param name="range">Range must be odd!</param>
-        private static void BoxBlurHorizontalAlpha(IFastBitmap targetFastBitmap, int range)
-        {
-            if (!targetFastBitmap.HasAlphaChannel)
+            finally
             {
-                throw new NotSupportedException("BoxBlurHorizontalAlpha should be called for bitmaps with alpha channel");
-            }
-
-            int halfRange = range / 2;
-            Color[] newColors = new Color[targetFastBitmap.Width];
-            byte[] tmpColor = new byte[4];
-            for (int y = targetFastBitmap.Top; y < targetFastBitmap.Bottom; y++)
-            {
-                int hits = 0;
-                int a = 0;
-                int r = 0;
-                int g = 0;
-                int b = 0;
-                for (int x = targetFastBitmap.Left - halfRange; x < targetFastBitmap.Right; x++)
-                {
-                    int oldPixel = x - halfRange - 1;
-                    if (oldPixel >= targetFastBitmap.Left)
-                    {
-                        targetFastBitmap.GetColorAt(oldPixel, y, tmpColor);
-                        a -= tmpColor[FastBitmap.ColorIndexA];
-                        r -= tmpColor[FastBitmap.ColorIndexR];
-                        g -= tmpColor[FastBitmap.ColorIndexG];
-                        b -= tmpColor[FastBitmap.ColorIndexB];
-                        hits--;
-                    }
-
-                    int newPixel = x + halfRange;
-                    if (newPixel < targetFastBitmap.Right)
-                    {
-                        targetFastBitmap.GetColorAt(newPixel, y, tmpColor);
-                        a += tmpColor[FastBitmap.ColorIndexA];
-                        r += tmpColor[FastBitmap.ColorIndexR];
-                        g += tmpColor[FastBitmap.ColorIndexG];
-                        b += tmpColor[FastBitmap.ColorIndexB];
-                        hits++;
-                    }
-
-                    if (x >= targetFastBitmap.Left)
-                    {
-                        newColors[x - targetFastBitmap.Left] = Color.FromArgb((byte) (a / hits), (byte) (r / hits), (byte) (g / hits), (byte) (b / hits));
-                    }
-                }
-
-                for (int x = targetFastBitmap.Left; x < targetFastBitmap.Right; x++)
-                {
-                    targetFastBitmap.SetColorAt(x, y, newColors[x - targetFastBitmap.Left]);
-                }
-            }
-        }
-
-        /// <summary>
-        /// BoxBlurVertical is a private helper method for the BoxBlur
-        /// </summary>
-        /// <param name="targetFastBitmap">BitmapBuffer which previously was created with BoxBlurHorizontal</param>
-        /// <param name="range">Range must be odd!</param>
-        private static void BoxBlurVertical(IFastBitmap targetFastBitmap, int range)
-        {
-            if (targetFastBitmap.HasAlphaChannel)
-            {
-                throw new NotSupportedException("BoxBlurVertical should NOT be called for bitmaps with alpha channel");
-            }
-
-            int halfRange = range / 2;
-            Color[] newColors = new Color[targetFastBitmap.Height];
-            byte[] tmpColor = new byte[4];
-            for (int x = targetFastBitmap.Left; x < targetFastBitmap.Right; x++)
-            {
-                int hits = 0;
-                int r = 0;
-                int g = 0;
-                int b = 0;
-                for (int y = targetFastBitmap.Top - halfRange; y < targetFastBitmap.Bottom; y++)
-                {
-                    int oldPixel = y - halfRange - 1;
-                    if (oldPixel >= targetFastBitmap.Top)
-                    {
-                        targetFastBitmap.GetColorAt(x, oldPixel, tmpColor);
-                        r -= tmpColor[FastBitmap.ColorIndexR];
-                        g -= tmpColor[FastBitmap.ColorIndexG];
-                        b -= tmpColor[FastBitmap.ColorIndexB];
-                        hits--;
-                    }
-
-                    int newPixel = y + halfRange;
-                    if (newPixel < targetFastBitmap.Bottom)
-                    {
-                        targetFastBitmap.GetColorAt(x, newPixel, tmpColor);
-                        r += tmpColor[FastBitmap.ColorIndexR];
-                        g += tmpColor[FastBitmap.ColorIndexG];
-                        b += tmpColor[FastBitmap.ColorIndexB];
-                        hits++;
-                    }
-
-                    if (y >= targetFastBitmap.Top)
-                    {
-                        newColors[y - targetFastBitmap.Top] = Color.FromArgb(255, (byte) (r / hits), (byte) (g / hits), (byte) (b / hits));
-                    }
-                }
-
-                for (int y = targetFastBitmap.Top; y < targetFastBitmap.Bottom; y++)
-                {
-                    targetFastBitmap.SetColorAt(x, y, newColors[y - targetFastBitmap.Top]);
-                }
-            }
-        }
-
-        /// <summary>
-        /// BoxBlurVertical is a private helper method for the BoxBlur
-        /// </summary>
-        /// <param name="targetFastBitmap">BitmapBuffer which previously was created with BoxBlurHorizontal</param>
-        /// <param name="range">Range must be odd!</param>
-        private static void BoxBlurVerticalAlpha(IFastBitmap targetFastBitmap, int range)
-        {
-            if (!targetFastBitmap.HasAlphaChannel)
-            {
-                throw new NotSupportedException("BoxBlurVerticalAlpha should be called for bitmaps with alpha channel");
-            }
-
-            int halfRange = range / 2;
-            Color[] newColors = new Color[targetFastBitmap.Height];
-            byte[] tmpColor = new byte[4];
-            for (int x = targetFastBitmap.Left; x < targetFastBitmap.Right; x++)
-            {
-                int hits = 0;
-                int a = 0;
-                int r = 0;
-                int g = 0;
-                int b = 0;
-                for (int y = targetFastBitmap.Top - halfRange; y < targetFastBitmap.Bottom; y++)
-                {
-                    int oldPixel = y - halfRange - 1;
-                    if (oldPixel >= targetFastBitmap.Top)
-                    {
-                        targetFastBitmap.GetColorAt(x, oldPixel, tmpColor);
-                        a -= tmpColor[FastBitmap.ColorIndexA];
-                        r -= tmpColor[FastBitmap.ColorIndexR];
-                        g -= tmpColor[FastBitmap.ColorIndexG];
-                        b -= tmpColor[FastBitmap.ColorIndexB];
-                        hits--;
-                    }
-
-                    int newPixel = y + halfRange;
-                    if (newPixel < targetFastBitmap.Bottom)
-                    {
-                        //int colorg = pixels[index + newPixelOffset];
-                        targetFastBitmap.GetColorAt(x, newPixel, tmpColor);
-                        a += tmpColor[FastBitmap.ColorIndexA];
-                        r += tmpColor[FastBitmap.ColorIndexR];
-                        g += tmpColor[FastBitmap.ColorIndexG];
-                        b += tmpColor[FastBitmap.ColorIndexB];
-                        hits++;
-                    }
-
-                    if (y >= targetFastBitmap.Top)
-                    {
-                        newColors[y - targetFastBitmap.Top] = Color.FromArgb((byte) (a / hits), (byte) (r / hits), (byte) (g / hits), (byte) (b / hits));
-                    }
-                }
-
-                for (int y = targetFastBitmap.Top; y < targetFastBitmap.Bottom; y++)
-                {
-                    targetFastBitmap.SetColorAt(x, y, newColors[y - targetFastBitmap.Top]);
-                }
+                ArrayPool<int>.Shared.Return(sums);
+                ArrayPool<byte>.Shared.Return(ring);
             }
         }
 
         /// <summary>
         /// This method fixes the problem that we can't apply a filter outside the target bitmap,
-        /// therefor the filtered-bitmap will be shifted if we try to draw it outside the target bitmap.
+        /// therefore the filtered-bitmap will be shifted if we try to draw it outside the target bitmap.
         /// It will also account for the Invert flag.
         /// </summary>
         /// <param name="applySize"></param>
@@ -889,7 +677,8 @@ namespace Greenshot.Base.Core
                 },
                 new float[]
                 {
-                    1, 1, 1, 1, 1
+                    // No offset for the alpha: transparent stays transparent (BUG-2397)
+                    1, 1, 1, 0, 1
                 }
             });
             ApplyColorMatrix(clone, invertMatrix);
@@ -966,19 +755,24 @@ namespace Greenshot.Base.Core
         /// <returns>b/w bitmap</returns>
         public static Bitmap CreateMonochrome(Image sourceImage, byte threshold)
         {
-            using IFastBitmap fastBitmap = FastBitmap.CreateCloneOf(sourceImage, sourceImage.PixelFormat);
-            for (int y = 0; y < fastBitmap.Height; y++)
+            Bitmap monochrome = CloneArea(sourceImage, NativeRect.Empty, sourceImage.PixelFormat);
+            BitmapPixels.ProcessPixelRows<Bgra32>(monochrome, pixels =>
             {
-                for (int x = 0; x < fastBitmap.Width; x++)
+                for (int y = 0; y < pixels.Height; y++)
                 {
-                    Color color = fastBitmap.GetColorAt(x, y);
-                    int colorBrightness = (color.R + color.G + color.B) / 3 > threshold ? 255 : 0;
-                    Color monoColor = Color.FromArgb(color.A, colorBrightness, colorBrightness, colorBrightness);
-                    fastBitmap.SetColorAt(x, y, monoColor);
+                    var row = pixels.GetRowSpan(y);
+                    for (int x = 0; x < row.Length; x++)
+                    {
+                        ref Bgra32 pixel = ref row[x];
+                        byte colorBrightness = (byte)((pixel.R + pixel.G + pixel.B) / 3 > threshold ? 255 : 0);
+                        pixel.R = colorBrightness;
+                        pixel.G = colorBrightness;
+                        pixel.B = colorBrightness;
+                    }
                 }
-            }
+            });
 
-            return fastBitmap.UnlockAndReturnBitmap();
+            return monochrome;
         }
 
         /// <summary>
@@ -1008,7 +802,11 @@ namespace Greenshot.Base.Core
                 graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
                 using (GraphicsPath path = new GraphicsPath())
                 {
-                    path.AddRectangle(new NativeRect(borderSize >> 1, borderSize >> 1, newImage.Width - borderSize, newImage.Height - borderSize));
+                    // The pen is centered on the path, so the path runs along the middle of the border.
+                    // With an odd borderSize this is on a half pixel, an integer shift (borderSize >> 1) would move the border
+                    // by half a pixel: blurred on the left and top, and the last column and row at the right and bottom stay empty.
+                    float halfBorder = borderSize / 2f;
+                    path.AddRectangle(new RectangleF(halfBorder, halfBorder, newImage.Width - borderSize, newImage.Height - borderSize));
                     using Pen pen = new Pen(borderColor, borderSize)
                     {
                         LineJoin = LineJoin.Round,
@@ -1102,31 +900,38 @@ namespace Greenshot.Base.Core
         public static Image CreateGrayscale(Image sourceImage)
         {
             Bitmap clone = (Bitmap) Clone(sourceImage);
-            ColorMatrix grayscaleMatrix = new ColorMatrix(new[]
-            {
-                new[]
-                {
-                    .3f, .3f, .3f, 0, 0
-                },
-                new[]
-                {
-                    .59f, .59f, .59f, 0, 0
-                },
-                new[]
-                {
-                    .11f, .11f, .11f, 0, 0
-                },
-                new float[]
-                {
-                    0, 0, 0, 1, 0
-                },
-                new float[]
-                {
-                    0, 0, 0, 0, 1
-                }
-            });
-            ApplyColorMatrix(clone, grayscaleMatrix);
+            ApplyGrayscale(clone);
             return clone;
+        }
+
+        /// <summary>
+        /// Make the bitmap gray of the same brightness, like the HDR image (LinearColorEffects.LinearGrayscale): the luminance of BT.709 in linear light
+        /// </summary>
+        /// <param name="bitmap">Bitmap to change</param>
+        public static unsafe void ApplyGrayscale(Bitmap bitmap)
+        {
+            // ImageSharp works on the pixels of the bitmap, locked as 32 bit ARGB
+            var bitmapData = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height), ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+            try
+            {
+                if (bitmapData.Stride == bitmap.Width * 4)
+                {
+                    // The rows have no gaps: one image
+                    using var pixels = SixLabors.ImageSharp.Image.WrapMemory<Bgra32>(bitmapData.Scan0.ToPointer(), bitmap.Width, bitmap.Height);
+                    SixLabors.ImageSharp.Processing.ProcessingExtensions.Mutate(pixels, context => context.LinearGrayscale(srgbEncoded: true));
+                    return;
+                }
+                // Rows with gaps or bottom-up (a bitmap on memory of its own): row by row
+                for (int y = 0; y < bitmap.Height; y++)
+                {
+                    using var row = SixLabors.ImageSharp.Image.WrapMemory<Bgra32>(((byte*)bitmapData.Scan0 + (long)y * bitmapData.Stride), bitmap.Width, 1);
+                    SixLabors.ImageSharp.Processing.ProcessingExtensions.Mutate(row, context => context.LinearGrayscale(srgbEncoded: true));
+                }
+            }
+            finally
+            {
+                bitmap.UnlockBits(bitmapData);
+            }
         }
 
         /// <summary>
@@ -1171,9 +976,9 @@ namespace Greenshot.Base.Core
         /// <summary>
         /// Clone an image, taking some rules into account:
         /// 1) When sourceRect is the whole bitmap there is a GDI+ bug in Clone
-        ///		Clone will than return the same PixelFormat as the source
-        ///		a quick workaround is using new Bitmap which uses a default of Format32bppArgb
-        ///	2) When going from a transparent to a non transparent bitmap, we draw the background white!
+        ///    Clone will than return the same PixelFormat as the source
+        ///    a quick workaround is using new Bitmap which uses a default of Format32bppArgb
+        /// 2) When going from a transparent to a non transparent bitmap, we draw the background white!
         /// </summary>
         /// <param name="sourceImage">Source bitmap to clone</param>
         /// <param name="sourceRect">NativeRect to copy from the source, use NativeRect.Empty for all</param>
@@ -1235,6 +1040,11 @@ namespace Greenshot.Base.Core
                     // Rule 2: Make sure the background color is white
                     graphics.Clear(Color.White);
                 }
+                else
+                {
+                    // Nothing to blend with, copy the pixels as they are: the default SourceOver blends every pixel
+                    graphics.CompositingMode = CompositingMode.SourceCopy;
+                }
 
                 // decide fastest copy method
                 if (isAreaEqual)
@@ -1249,7 +1059,12 @@ namespace Greenshot.Base.Core
             else
             {
                 // Let GDI+ decide how to convert, need to test what is quicker...
-                newImage = (sourceImage as Bitmap).Clone(sourceRect, targetFormat);
+                var sourceBitmap = sourceImage as Bitmap;
+                if (sourceBitmap == null)
+                {
+                    throw new InvalidOperationException($"Expected Bitmap but got {sourceImage?.GetType().Name}");
+                }
+                newImage = sourceBitmap.Clone(sourceRect, targetFormat);
                 // Make sure both images have the same resolution
                 newImage.SetResolution(sourceImage.HorizontalResolution, sourceImage.VerticalResolution);
             }
@@ -1321,6 +1136,10 @@ namespace Greenshot.Base.Core
         /// <returns>Bitmap</returns>
         public static Bitmap CreateEmpty(int width, int height, PixelFormat format, Color backgroundColor, float horizontalResolution = 96f, float verticalResolution = 96f)
         {
+            if (width <= 0 || height <= 0)
+            {
+                throw new ArgumentException($"Cannot create a bitmap with non-positive dimensions ({width}x{height}).");
+            }
             // Create a new "clean" image
             Bitmap newImage = new Bitmap(width, height, format);
             newImage.SetResolution(horizontalResolution, verticalResolution);
@@ -1384,48 +1203,11 @@ namespace Greenshot.Base.Core
         }
 
         /// <summary>
-        /// Count how many times the supplied color exists
-        /// </summary>
-        /// <param name="sourceImage">Image to count the pixels of</param>
-        /// <param name="colorToCount">Color to count</param>
-        /// <param name="includeAlpha">true if Alpha needs to be checked</param>
-        /// <returns>int with the number of pixels which have colorToCount</returns>
-        public static int CountColor(Image sourceImage, Color colorToCount, bool includeAlpha)
-        {
-            int colors = 0;
-            int toCount = colorToCount.ToArgb();
-            if (!includeAlpha)
-            {
-                toCount &= 0xffffff;
-            }
-
-            using IFastBitmap bb = FastBitmap.Create((Bitmap) sourceImage);
-            for (int y = 0; y < bb.Height; y++)
-            {
-                for (int x = 0; x < bb.Width; x++)
-                {
-                    int bitmapcolor = bb.GetColorAt(x, y).ToArgb();
-                    if (!includeAlpha)
-                    {
-                        bitmapcolor &= 0xffffff;
-                    }
-
-                    if (bitmapcolor == toCount)
-                    {
-                        colors++;
-                    }
-                }
-            }
-
-            return colors;
-        }
-
-        /// <summary>
         /// Scale the bitmap, keeping aspect ratio, but the canvas will always have the specified size.
         /// </summary>
         /// <param name="sourceImage">Image to scale</param>
         /// <param name="maintainAspectRatio">true to maintain the aspect ratio</param>
-        /// <param name="canvasUseNewSize">Makes the image maintain aspect ratio, but the canvas get's the specified size</param>
+        /// <param name="canvasUseNewSize">Makes the image maintain aspect ratio, but the canvas gets the specified size</param>
         /// <param name="backgroundColor">The color to fill with, or Color.Empty to take the default depending on the pixel format</param>
         /// <param name="newWidth">new width</param>
         /// <param name="newHeight">new height</param>
@@ -1436,52 +1218,58 @@ namespace Greenshot.Base.Core
             int destX = 0;
             int destY = 0;
 
-            var nPercentW = newWidth / (float) sourceImage.Width;
-            var nPercentH = newHeight / (float) sourceImage.Height;
+            // A width or height of 0 (or less) means: not given.
+            // With the aspect ratio kept it is calculated from the other one, without it the side keeps its size.
+            bool hasWidth = newWidth > 0;
+            bool hasHeight = newHeight > 0;
+            var nPercentW = hasWidth ? newWidth / (float) sourceImage.Width : 1f;
+            var nPercentH = hasHeight ? newHeight / (float) sourceImage.Height : 1f;
             if (maintainAspectRatio)
             {
-                if ((int) nPercentW == 1)
+                float nPercent;
+                if (hasWidth && hasHeight)
                 {
-                    nPercentW = nPercentH;
-                    if (canvasUseNewSize)
-                    {
-                        destX = Math.Max(0, Convert.ToInt32((newWidth - sourceImage.Width * nPercentW) / 2));
-                    }
+                    // Fit into the given size
+                    nPercent = Math.Min(nPercentW, nPercentH);
                 }
-                else if ((int) nPercentH == 1)
+                else if (hasWidth)
                 {
-                    nPercentH = nPercentW;
-                    if (canvasUseNewSize)
-                    {
-                        destY = Math.Max(0, Convert.ToInt32((newHeight - sourceImage.Height * nPercentH) / 2));
-                    }
+                    nPercent = nPercentW;
                 }
-                else if ((int) nPercentH != 0 && nPercentH < nPercentW)
+                else if (hasHeight)
                 {
-                    nPercentW = nPercentH;
-                    if (canvasUseNewSize)
-                    {
-                        destX = Math.Max(0, Convert.ToInt32((newWidth - sourceImage.Width * nPercentW) / 2));
-                    }
+                    nPercent = nPercentH;
                 }
                 else
                 {
-                    nPercentH = nPercentW;
-                    if (canvasUseNewSize)
+                    nPercent = 1f;
+                }
+
+                if (canvasUseNewSize)
+                {
+                    if (hasWidth)
                     {
-                        destY = Math.Max(0, Convert.ToInt32((newHeight - sourceImage.Height * nPercentH) / 2));
+                        destX = Math.Max(0, Convert.ToInt32((newWidth - sourceImage.Width * nPercent) / 2));
+                    }
+
+                    if (hasHeight)
+                    {
+                        destY = Math.Max(0, Convert.ToInt32((newHeight - sourceImage.Height * nPercent) / 2));
                     }
                 }
+
+                nPercentW = nPercent;
+                nPercentH = nPercent;
             }
 
-            int destWidth = (int) (sourceImage.Width * nPercentW);
-            int destHeight = (int) (sourceImage.Height * nPercentH);
-            if (newWidth == 0)
+            int destWidth = Math.Max(1, (int) Math.Round(sourceImage.Width * nPercentW));
+            int destHeight = Math.Max(1, (int) Math.Round(sourceImage.Height * nPercentH));
+            if (!hasWidth)
             {
                 newWidth = destWidth;
             }
 
-            if (newHeight == 0)
+            if (!hasHeight)
             {
                 newHeight = destHeight;
             }
@@ -1587,6 +1375,7 @@ namespace Greenshot.Base.Core
                     bitmap.HorizontalResolution, bitmap.VerticalResolution,
                     bitmap.PixelFormat.Map(), null,
                     bitmapData.Scan0, bitmapData.Stride * bitmapData.Height, bitmapData.Stride);
+                bitmapSource.Freeze();
             }
             finally
             {
@@ -1594,6 +1383,61 @@ namespace Greenshot.Base.Core
             }
 
             return bitmapSource;
+        }
+
+        /// <summary>
+        /// Convert an Image to a BitmapSource
+        /// </summary>
+        /// <param name="image">Image</param>
+        /// <returns>BitmapSource</returns>
+        public static BitmapSource ToBitmapSource(this Image image)
+        {
+            if (image == null)
+            {
+                return null;
+            }
+
+            if (image is Bitmap bitmap)
+            {
+                try
+                {
+                    return ToBitmapSource(bitmap);
+                }
+                catch (Exception)
+                {
+                    // Fall back to 32bpp conversion if pixel format is not directly mappable or LockBits fails
+                }
+            }
+
+            try
+            {
+                using var bmp = new Bitmap(image.Width, image.Height, PixelFormat.Format32bppArgb);
+                using (var g = Graphics.FromImage(bmp))
+                {
+                    g.DrawImage(image, 0, 0, image.Width, image.Height);
+                }
+                return ToBitmapSource(bmp);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Convert an Icon to a BitmapSource
+        /// </summary>
+        /// <param name="icon">Icon</param>
+        /// <returns>BitmapSource</returns>
+        public static BitmapSource ToBitmapSource(this Icon icon)
+        {
+            if (icon == null)
+            {
+                return null;
+            }
+
+            using var bmp = icon.ToBitmap();
+            return ToBitmapSource(bmp);
         }
 
         /// <summary>

@@ -1,13 +1,13 @@
 /*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  *
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
@@ -20,16 +20,13 @@
  */
 
 using System;
+using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
-using Dapplo.Windows.Kernel32;
-using Dapplo.Windows.Kernel32.Enums;
-using Dapplo.Windows.Kernel32.Structs;
 using Dapplo.Windows.User32;
-using Dapplo.Windows.Common.Extensions;
-using Greenshot.Base.IniFile;
-using Microsoft.Win32;
+using Greenshot.Base.Interfaces.Plugin;
+using System.Linq;
 
 namespace Greenshot.Base.Core
 {
@@ -54,16 +51,14 @@ namespace Greenshot.Base.Core
             }
         }
 
-        public static bool IsNet45OrNewer()
-        {
-            // Class "ReflectionContext" exists from .NET 4.5 onwards.
-            return Type.GetType("System.Reflection.ReflectionContext", false) != null;
-        }
+        public static string GetGreenshotVersion(bool shortVersion = false) => GetVersion(Assembly.GetExecutingAssembly(), shortVersion);
 
-        public static string GetGreenshotVersion(bool shortVersion = false)
+        /// <summary>
+        /// The version of an assembly as the build made it: the informational version (e.g. 1.4.123 - g1a2b3c4), the short one is
+        /// the file version (1.4.123). The assembly version alone only has major and minor (1.4.0.0).
+        /// </summary>
+        public static string GetVersion(Assembly executingAssembly, bool shortVersion = false)
         {
-            var executingAssembly = Assembly.GetExecutingAssembly();
-
             // Use assembly version
             string greenshotVersion = executingAssembly.GetName().Version.ToString();
 
@@ -99,8 +94,8 @@ namespace Greenshot.Base.Core
         public static string EnvironmentToString(bool newline)
         {
             StringBuilder environment = new();
-            environment.Append("Software version: " + GetGreenshotVersion());
-            if (IniConfig.IsPortable)
+            environment.Append("Software version: " + GetGreenshotVersion() + EditionInfo.Suffix);
+            if (GreenshotEnvironment.IsPortable)
             {
                 environment.Append(" Portable");
             }
@@ -117,10 +112,6 @@ namespace Greenshot.Base.Core
             }
 
             environment.Append(".NET runtime version: " + Environment.Version);
-            if (IsNet45OrNewer())
-            {
-                environment.Append("+");
-            }
 
             if (newline)
             {
@@ -145,16 +136,6 @@ namespace Greenshot.Base.Core
                 }
 
                 environment.Append($"OS: {OsInfo.Name}");
-                if (!string.IsNullOrEmpty(OsInfo.Edition))
-                {
-                    environment.Append($" {OsInfo.Edition}");
-                }
-
-                if (!string.IsNullOrEmpty(OsInfo.ServicePack))
-                {
-                    environment.Append($" {OsInfo.ServicePack}");
-                }
-
                 environment.Append($" x{OsInfo.Bits}");
                 environment.Append($" {OsInfo.VersionString}");
                 if (newline)
@@ -203,6 +184,18 @@ namespace Greenshot.Base.Core
             }
             // TODO: Is this needed?
             // environment.AppendFormat("Surface count: {0}", Surface.Count);
+
+            environment.Append("Plugin list: ");
+            environment.Append(string.Join(",", SimpleServiceProvider.Current.GetAllInstances<IGreenshotPlugin>().Select(plugin => plugin.Name)));
+
+            if (newline)
+            {
+                environment.AppendLine();
+            }
+            else
+            {
+                environment.Append(", ");
+            }
 
             return environment.ToString();
         }
@@ -265,11 +258,16 @@ namespace Greenshot.Base.Core
 
             return exceptionText.ToString();
         }
+
+        /// <summary>
+        /// Returns the directory where the application is located
+        /// </summary>
+        public static string GetApplicationFolder()
+            => Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
     }
 
     /// <summary>
-    /// Provides detailed information about the host operating system.
-    /// Code is available at: https://www.csharp411.com/determine-windows-version-and-edition-with-c/
+    /// Provides information about the host operating system, Greenshot needs Windows 10 1809 or later.
     /// </summary>
     public static class OsInfo
     {
@@ -278,298 +276,14 @@ namespace Greenshot.Base.Core
         /// </summary>
         public static int Bits => IntPtr.Size * 8;
 
-        private static string _sEdition;
-
-        /// <summary>
-        /// Gets the edition of the operating system running on this computer.
-        /// </summary>
-        public static string Edition
-        {
-            get
-            {
-                if (_sEdition != null)
-                {
-                    return _sEdition; //***** RETURN *****//
-                }
-
-                string edition = string.Empty;
-
-                OperatingSystem osVersion = Environment.OSVersion;
-                var osVersionInfo = OsVersionInfoEx.Create();
-
-                if (Kernel32Api.GetVersionEx(ref osVersionInfo))
-                {
-                    int majorVersion = osVersion.Version.Major;
-                    int minorVersion = osVersion.Version.Minor;
-                    var productType = osVersionInfo.ProductType;
-                    var suiteMask = osVersionInfo.SuiteMask;
-
-                    if (majorVersion == 4)
-                    {
-                        if (productType == WindowsProductTypes.VER_NT_WORKSTATION)
-                        {
-                            // Windows NT 4.0 Workstation
-                            edition = "Workstation";
-                        }
-                        else if (productType == WindowsProductTypes.VER_NT_SERVER)
-                        {
-                            edition = (suiteMask & WindowsSuites.Enterprise) != 0 ? "Enterprise Server" : "Standard Server";
-                        }
-                    }
-
-                    else if (majorVersion == 5)
-                    {
-                        if (productType == WindowsProductTypes.VER_NT_WORKSTATION)
-                        {
-                            if ((suiteMask & WindowsSuites.Personal) != 0)
-                            {
-                                // Windows XP Home Edition
-                                edition = "Home";
-                            }
-                            else
-                            {
-                                // Windows XP / Windows 2000 Professional
-                                edition = "Professional";
-                            }
-                        }
-                        else if (productType == WindowsProductTypes.VER_NT_SERVER)
-                        {
-                            if (minorVersion == 0)
-                            {
-                                if ((suiteMask & WindowsSuites.DataCenter) != 0)
-                                {
-                                    // Windows 2000 Datacenter Server
-                                    edition = "Datacenter Server";
-                                }
-                                else if ((suiteMask & WindowsSuites.Enterprise) != 0)
-                                {
-                                    // Windows 2000 Advanced Server
-                                    edition = "Advanced Server";
-                                }
-                                else
-                                {
-                                    // Windows 2000 Server
-                                    edition = "Server";
-                                }
-                            }
-                            else
-                            {
-                                if ((suiteMask & WindowsSuites.DataCenter) != 0)
-                                {
-                                    // Windows Server 2003 Datacenter Edition
-                                    edition = "Datacenter";
-                                }
-                                else if ((suiteMask & WindowsSuites.Enterprise) != 0)
-                                {
-                                    // Windows Server 2003 Enterprise Edition
-                                    edition = "Enterprise";
-                                }
-                                else if ((suiteMask & WindowsSuites.Blade) != 0)
-                                {
-                                    // Windows Server 2003 Web Edition
-                                    edition = "Web Edition";
-                                }
-                                else
-                                {
-                                    // Windows Server 2003 Standard Edition
-                                    edition = "Standard";
-                                }
-                            }
-                        }
-                    }
-
-                    else if (majorVersion == 6)
-                    {
-                        if (Kernel32Api.GetProductInfo(majorVersion, minorVersion, osVersionInfo.ServicePackMajor, osVersionInfo.ServicePackMinor, out var windowsProduct))
-                        {
-                            edition = windowsProduct.GetEnumDescription();
-                        }
-                    }
-                }
-
-                _sEdition = edition;
-                return edition;
-            }
-        }
-
-        private static string _name;
-
         /// <summary>
         /// Gets the name of the operating system running on this computer.
         /// </summary>
-        public static string Name
-        {
-            get
-            {
-                if (_name != null)
-                {
-                    return _name; //***** RETURN *****//
-                }
-
-                string name = "unknown";
-
-                OperatingSystem osVersion = Environment.OSVersion;
-                var osVersionInfo = OsVersionInfoEx.Create();
-                if (Kernel32Api.GetVersionEx(ref osVersionInfo))
-                {
-                    int majorVersion = osVersion.Version.Major;
-                    int minorVersion = osVersion.Version.Minor;
-                    var productType = osVersionInfo.ProductType;
-                    var suiteMask = osVersionInfo.SuiteMask;
-                    switch (osVersion.Platform)
-                    {
-                        case PlatformID.Win32Windows:
-                            if (majorVersion == 4)
-                            {
-                                string csdVersion = osVersionInfo.ServicePackVersion;
-                                switch (minorVersion)
-                                {
-                                    case 0:
-                                        if (csdVersion == "B" || csdVersion == "C")
-                                        {
-                                            name = "Windows 95 OSR2";
-                                        }
-                                        else
-                                        {
-                                            name = "Windows 95";
-                                        }
-
-                                        break;
-                                    case 10:
-                                        name = csdVersion == "A" ? "Windows 98 Second Edition" : "Windows 98";
-                                        break;
-                                    case 90:
-                                        name = "Windows Me";
-                                        break;
-                                }
-                            }
-
-                            break;
-                        case PlatformID.Win32NT:
-                            switch (majorVersion)
-                            {
-                                case 3:
-                                    name = "Windows NT 3.51";
-                                    break;
-                                case 4:
-                                    switch (productType)
-                                    {
-                                        case WindowsProductTypes.VER_NT_WORKSTATION:
-                                            name = "Windows NT 4.0";
-                                            break;
-                                        case WindowsProductTypes.VER_NT_SERVER:
-                                            name = "Windows NT 4.0 Server";
-                                            break;
-                                    }
-
-                                    break;
-                                case 5:
-                                    switch (minorVersion)
-                                    {
-                                        case 0:
-                                            name = "Windows 2000";
-                                            break;
-                                        case 1:
-                                            name = suiteMask switch
-                                            {
-                                                WindowsSuites.Personal => "Windows XP Professional",
-                                                _ => "Windows XP"
-                                            };
-                                            break;
-                                        case 2:
-                                            name = suiteMask switch
-                                            {
-                                                WindowsSuites.Personal => "Windows XP Professional x64",
-                                                WindowsSuites.Enterprise => "Windows Server 2003 Enterprise",
-                                                WindowsSuites.DataCenter => "Windows Server 2003 Data Center",
-                                                WindowsSuites.Blade => "Windows Server 2003 Web Edition",
-                                                WindowsSuites.WHServer => "Windows Home Server",
-                                                _ => "Windows Server 2003"
-                                            };
-                                            break;
-                                    }
-
-                                    break;
-                                case 6:
-                                    switch (minorVersion)
-                                    {
-                                        case 0:
-                                            name = productType switch
-                                            {
-                                                WindowsProductTypes.VER_NT_SERVER => "Windows Server 2008",
-                                                _ => "Windows Vista"
-                                            };
-                                            break;
-                                        case 1:
-                                            name = productType switch
-                                            {
-                                                WindowsProductTypes.VER_NT_SERVER => "Windows Server 2008 R2",
-                                                _ => "Windows 7"
-                                            };
-                                            break;
-                                        case 2:
-                                            name = "Windows 8";
-                                            break;
-                                        case 3:
-                                            name = "Windows 8.1";
-                                            break;
-                                    }
-
-                                    break;
-                                case 10:
-                                    string releaseId = Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion", "ReleaseId", "").ToString();
-                                    name = $"Windows 10 {releaseId}";
-                                    break;
-                            }
-
-                            break;
-                    }
-                }
-
-                _name = name;
-                return name;
-            }
-        }
+        public static string Name => Environment.OSVersion.Version.Build < 22000 ? "Windows 10" : "Windows 11";
 
         /// <summary>
-        /// Gets the service pack information of the operating system running on this computer.
+        /// Gets the version string of the operating system running on this computer.
         /// </summary>
-        public static string ServicePack
-        {
-            get
-            {
-                string servicePack = string.Empty;
-                OsVersionInfoEx osVersionInfo = OsVersionInfoEx.Create();
-
-                if (Kernel32Api.GetVersionEx(ref osVersionInfo))
-                {
-                    servicePack = osVersionInfo.ServicePackVersion;
-                }
-
-                return servicePack;
-            }
-        }
-
-        /// <summary>
-        /// Gets the full version string of the operating system running on this computer.
-        /// </summary>
-        public static string VersionString
-        {
-            get
-            {
-                if (WindowsVersion.IsWindows10OrLater)
-                {
-                    return $"build {Environment.OSVersion.Version.Build}";
-                }
-
-                if (Environment.OSVersion.Version.Revision != 0)
-                {
-                    return
-                        $"{Environment.OSVersion.Version.Major}.{Environment.OSVersion.Version.Minor} build {Environment.OSVersion.Version.Build} revision {Environment.OSVersion.Version.Revision:X}";
-                }
-
-                return $"{Environment.OSVersion.Version.Major}.{Environment.OSVersion.Version.Minor} build {Environment.OSVersion.Version.Build}";
-            }
-        }
+        public static string VersionString => $"build {Environment.OSVersion.Version.Build}";
     }
 }

@@ -1,13 +1,13 @@
 /*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -21,29 +21,36 @@
 
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Drawing;
 using Greenshot.Base.Core;
+using Greenshot.Base.Expressions;
 using Greenshot.Base.Interfaces;
 using Greenshot.Base.Interfaces.Plugin;
+using Greenshot.Base.Recipes.Pipeline;
 using Greenshot.Plugin.Office.Destinations;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Greenshot.Base.Threading;
+
+using Greenshot.Base.Languages;
+using Greenshot.Plugin.Office.Recipes;
+using Greenshot.Plugin.Office.Views;
 
 namespace Greenshot.Plugin.Office
 {
     /// <summary>
     /// This is the OfficePlugin base code
     /// </summary>
-    public class OfficePlugin : IGreenshotPlugin
+    public class OfficePlugin : IGreenshotPlugin, IConfigurablePlugin, IRecipeStepProvider
     {
         private static readonly log4net.ILog LOG = log4net.LogManager.GetLogger(typeof(OfficePlugin));
+        private IOfficeConfiguration _config;
 
-        public void Dispose()
+        public ValueTask DisposeAsync()
         {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        private void Dispose(bool disposing)
-        {
-            // Do nothing
+            return default;
         }
 
         /// <summary>
@@ -51,107 +58,69 @@ namespace Greenshot.Plugin.Office
         /// </summary>
         public string Name => "Office";
 
-        /// <summary>
-        /// Specifies if the plugin can be configured
-        /// </summary>
-        public bool IsConfigurable => false;
-
-        private IEnumerable<IDestination> Destinations()
+        private static IEnumerable<IDestination> Destinations()
         {
-            IDestination destination;
-            try
+            return new[]
             {
-                destination = new ExcelDestination();
-            }
-            catch
-            {
-                destination = null;
-            }
-
-            if (destination != null)
-            {
-                yield return destination;
-            }
-
-            try
-            {
-                destination = new PowerpointDestination();
-            }
-            catch
-            {
-                destination = null;
-            }
-
-            if (destination != null)
-            {
-                yield return destination;
-            }
-
-            try
-            {
-                destination = new WordDestination();
-            }
-            catch
-            {
-                destination = null;
-            }
-
-            if (destination != null)
-            {
-                yield return destination;
-            }
-
-            try
-            {
-                destination = new OutlookDestination();
-            }
-            catch
-            {
-                destination = null;
-            }
-
-            if (destination != null)
-            {
-                yield return destination;
-            }
-
-            try
-            {
-                destination = new OneNoteDestination();
-            }
-            catch
-            {
-                destination = null;
-            }
-
-            if (destination != null)
-            {
-                yield return destination;
-            }
-        }
-
-
-        /// <summary>
-        /// Implementation of the IGreenshotPlugin.Initialize
-        /// </summary>
-        /// <returns>true if plugin is initialized, false if not (doesn't show)</returns>
-        public bool Initialize()
-        {
-            SimpleServiceProvider.Current.AddService(Destinations());
-            return true;
-        }
-
-        public void Shutdown()
-        {
-            LOG.Debug("Office Plugin shutdown.");
+                TryCreate(() => new ExcelDestination(), "Excel"),
+                TryCreate(() => new PowerpointDestination(), "PowerPoint"),
+                TryCreate(() => new WordDestination(), "Word"),
+                TryCreate(() => new OutlookDestination(), "Outlook"),
+                TryCreate(() => new OneNoteDestination(), "OneNote")
+            }.Where(destination => destination != null);
         }
 
         /// <summary>
-        /// Implementation of the IPlugin.Configure
+        /// The destination, null when it couldn't be created: logged, otherwise e.g. a TypeInitializationException
+        /// would leave it out for the whole run without a trace
         /// </summary>
-        public void Configure()
+        private static IDestination TryCreate(Func<IDestination> create, string application)
         {
-            throw new NotImplementedException();
+            try
+            {
+                return create();
+            }
+            catch (Exception ex)
+            {
+                LOG.Warn($"The {application} destination isn't available.", ex);
+                return null;
+            }
         }
+
+
+        public void ConfigureServices(IPluginServices services)
+        {
+            Texts.Register<IOfficeLanguage>(new OfficeLanguageImpl());
+            var section = new OfficeConfigurationImpl();
+            services.AddConfiguration(section);
+            _config = section;
+            if (string.IsNullOrEmpty(_config.EmailSubjectTemplate) && !string.IsNullOrEmpty(_config.EmailSubjectPattern))
+            {
+                // The template is filled once from the pattern of 1.3, which stays for going back to 1.3
+                _config.EmailSubjectTemplate = LegacyTemplateConverter.Convert(_config.EmailSubjectPattern, false);
+            }
+
+            // The destinations look for the Office installation and read the configuration
+            services.AddServices(() => Destinations().ToList());
+            services.AddRecipeStepProvider(this);
+            services.AddSettingsView<IOfficeConfiguration>(_ => new OfficeConfigurationView());
+        }
+
+        public object CreateSettingsViewModel(IServiceProvider services) => _config;
+
+        /// <summary>
+        /// Registers recipe step factories provided by the Office plugin.
+        /// </summary>
+        /// <param name="registry">The step registry.</param>
+        public void RegisterSteps(IStepRegistry registry)
+        {
+            if (registry == null) return;
+            registry.Register<OfficeStep>(config => new OfficeStep(config));
+        }
+
+        public Task StartAsync(IServiceProvider services, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
     }
-}
+}

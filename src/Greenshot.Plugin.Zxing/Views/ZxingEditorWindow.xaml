@@ -1,0 +1,50 @@
+<!--
+    The window for the barcode options of a recipe step: the barcode fields (BarcodeEditorView) with Apply and Cancel.
+    In the editor the same fields are the Barcode panel and the Barcode section of the Selection panel.
+-->
+<Window x:Class="Greenshot.Plugin.Zxing.Views.ZxingEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wpf="clr-namespace:Greenshot.Base.Wpf;assembly=Greenshot.Base"
+        xmlns:views="clr-namespace:Greenshot.Plugin.Zxing.Views"
+        Title="{wpf:Text Zxing.EditorTitleEdit}"
+        Width="440"
+        Height="640"
+        MinWidth="360"
+        MinHeight="420"
+        WindowStartupLocation="CenterOwner"
+        Background="{Binding Path=(wpf:ThemeScope.Theme).BackgroundBrush, RelativeSource={RelativeSource Self}}"
+        Foreground="{Binding Path=(wpf:ThemeScope.Theme).ForegroundBrush, RelativeSource={RelativeSource Self}}"
+        WindowStyle="None"
+        AllowsTransparency="False">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Greenshot.Base;component/Wpf/Styles/GreenshotStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Border BorderThickness="1" BorderBrush="{Binding Path=(wpf:ThemeScope.Theme).BorderBrush, RelativeSource={RelativeSource Self}}">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <wpf:ThemedTitleBar Grid.Row="0" ShowThemeToggle="True"/>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+                <views:BarcodeEditorView x:Name="EditorView" Margin="14,4,14,8"/>
+            </ScrollViewer>
+
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="14,6,14,14">
+                <Button Style="{StaticResource PrimaryButtonStyle}" Content="{wpf:Text Zxing.Apply}" MinWidth="100" Height="34"
+                        IsDefault="True" IsEnabled="{Binding ElementName=EditorView, Path=DataContext.IsValid}" Click="Apply_Click" Margin="0,0,8,0"/>
+                <Button Style="{StaticResource SecondaryButtonStyle}" Content="{wpf:Text Core.Cancel}" MinWidth="90" Height="34"
+                        IsCancel="True"/>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

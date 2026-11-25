@@ -1,13 +1,13 @@
 /*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -24,6 +24,8 @@ using System.Drawing;
 using System.Windows.Forms;
 using Dapplo.Windows.Common.Extensions;
 using Dapplo.Windows.Common.Structs;
+using Greenshot.Base.Core;
+using Greenshot.Base.Interfaces.Drawing;
 using Greenshot.Editor.Drawing;
 
 namespace Greenshot.Editor.Helpers
@@ -202,7 +204,7 @@ namespace Greenshot.Editor.Helpers
             {
                 // scaled rectangle (ratio) would be taller than original
                 // keep width and tweak height to maintain aspect ratio
-                newSize = newSize.ChangeWidth(selectedSize.Width / originalRatio * flippedRatioSign);
+                newSize = newSize.ChangeHeight(selectedSize.Width / originalRatio * flippedRatioSign);
             }
 
             return newSize;
@@ -243,9 +245,12 @@ namespace Greenshot.Editor.Helpers
 
             if (centeredScale)
             {
-                float wdiff = result.Width - result.Width;
-                float hdiff = result.Height - result.Height;
-                result = result.Inflate(wdiff, hdiff);
+                // The click point is the center: expand the result symmetrically around it.
+                // boundsBeforeResize.X/Y is the click origin (set in HandleMouseDown).
+                // result.Width/Height is the half-size (cursor distance from origin).
+                float halfW = result.Width;
+                float halfH = result.Height;
+                result = new NativeRectFloat(boundsBeforeResize.X - halfW, boundsBeforeResize.Y - halfH, halfW * 2, halfH * 2);
             }
 
             return result;
@@ -254,8 +259,9 @@ namespace Greenshot.Editor.Helpers
         /// <returns>the current ScaleOptions depending on modifier keys held down</returns>
         public static ScaleOptions GetScaleOptions()
         {
-            bool anchorAtCenter = (Control.ModifierKeys & Keys.Control) != 0;
-            bool maintainAspectRatio = (Control.ModifierKeys & Keys.Shift) != 0;
+            Keys modifierKeys = InputState.ModifierKeys;
+            bool anchorAtCenter = (modifierKeys & Keys.Control) != 0;
+            bool maintainAspectRatio = (modifierKeys & Keys.Shift) != 0;
             ScaleOptions opts = ScaleOptions.Default;
             if (anchorAtCenter) opts |= ScaleOptions.Centered;
             if (maintainAspectRatio) opts |= ScaleOptions.Rational;

@@ -1,13 +1,13 @@
 ﻿/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -45,6 +45,8 @@ namespace Greenshot.Editor.FileFormatHandlers
             SupportedExtensions[FileFormatHandlerActions.LoadDrawableFromStream] = _ourExtensions;
             SupportedExtensions[FileFormatHandlerActions.LoadFromStream] = _ourExtensions;
             SupportedExtensions[FileFormatHandlerActions.SaveToStream] = _ourExtensions;
+            SupportedExtensions[FileFormatHandlerActions.SaveToFile] = _ourExtensions;
+            SupportedExtensions[FileFormatHandlerActions.LoadFromFile] = _ourExtensions;
         }
 
         public override bool TrySaveToStream(Bitmap bitmap, Stream stream, string extension, ISurface surface = null, SurfaceOutputSettings surfaceOutputSettings = null)
@@ -114,7 +116,7 @@ namespace Greenshot.Editor.FileFormatHandlers
                 // Write the width / height, 0 means 256
                 binaryWriter.Write(imageSize.Width == 256 ? (byte)0 : (byte)imageSize.Width);
                 binaryWriter.Write(imageSize.Height == 256 ? (byte)0 : (byte)imageSize.Height);
-                binaryWriter.Write((byte)0); // no pallete
+                binaryWriter.Write((byte)0); // no palette
                 binaryWriter.Write((byte)0); // reserved
                 binaryWriter.Write((short)0); // no color planes
                 binaryWriter.Write((short)32); // 32 bpp
@@ -200,10 +202,8 @@ namespace Greenshot.Editor.FileFormatHandlers
 
                     int iImageSize = BitConverter.ToInt32(srcBuf, sizeIconDir + sizeIconDirEntry * iIndex + 8);
                     int iImageOffset = BitConverter.ToInt32(srcBuf, sizeIconDir + sizeIconDirEntry * iIndex + 12);
-                    using MemoryStream destStream = new MemoryStream();
-                    destStream.Write(srcBuf, iImageOffset, iImageSize);
-                    destStream.Seek(0, SeekOrigin.Begin);
-                    bmpPngExtracted = new Bitmap(destStream); // This is PNG! :)
+                    // This is PNG! :) Not disposed: GDI+ needs the stream as long as the bitmap lives
+                    bmpPngExtracted = new Bitmap(new MemoryStream(srcBuf, iImageOffset, iImageSize));
                     break;
                 }
             }

@@ -1,13 +1,13 @@
-﻿/*
+/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  *
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
@@ -19,8 +19,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+using System.Collections.Generic;
 using System.Drawing;
 using System.Threading.Tasks;
+using Greenshot.Base.Interfaces.Plugin;
 
 namespace Greenshot.Base.Interfaces.Ocr
 {
@@ -30,17 +32,25 @@ namespace Greenshot.Base.Interfaces.Ocr
     public interface IOcrProvider
     {
         /// <summary>
-        /// Start the actual OCR
+        /// Start the actual OCR. The pixels are read before this returns, the caller may change or dispose the image while the OCR runs.
         /// </summary>
         /// <param name="image">Image</param>
-        /// <returns>OcrInformation</returns>
-        Task<OcrInformation> DoOcrAsync(Image image);
+        /// <param name="languageTag">Optional OCR language tag (e.g. en-US, de-DE)</param>
+        /// <returns>List of detected OCR line features</returns>
+        Task<List<IOcrLineFeature>> DoOcrAsync(Image image, string languageTag = null);
 
         /// <summary>
-        /// Start the actual OCR
+        /// Start the actual OCR of the surface image (the background, not the elements drawn on it), read before this returns
         /// </summary>
         /// <param name="surface">ISurface</param>
-        /// <returns>OcrInformation</returns>
-        Task<OcrInformation> DoOcrAsync(ISurface surface);
+        /// <param name="languageTag">Optional OCR language tag (e.g. en-US, de-DE)</param>
+        /// <returns>List of detected OCR line features</returns>
+        Task<List<IOcrLineFeature>> DoOcrAsync(ISurface surface, string languageTag = null);
+
+        /// <summary>
+        /// The languages which can be recognized, for the OCR language setting
+        /// </summary>
+        /// <returns>The installed OCR languages, empty when none are installed</returns>
+        IList<OcrLanguage> GetAvailableLanguages();
     }
 }

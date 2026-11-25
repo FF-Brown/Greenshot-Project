@@ -1,0 +1,1760 @@
+<Window x:Class="Greenshot.SelfService.Views.SelfServiceWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:wpf="clr-namespace:Greenshot.Base.Wpf;assembly=Greenshot.Base"
+        xmlns:local="clr-namespace:Greenshot.SelfService.ViewModels"
+        xmlns:views="clr-namespace:Greenshot.SelfService.Views"
+        mc:Ignorable="d"
+        Title="{Binding WindowTitle}"
+        Width="940"
+        Height="680"
+        MinWidth="780"
+        MinHeight="500"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResizeWithGrip"
+        FontFamily="Segoe UI, Segoe UI Variable Display, Tahoma, Arial"
+        FontSize="{wpf:FontSize 13}"
+        Background="{Binding WindowBackgroundBrush}"
+        Foreground="{Binding TextPrimaryBrush}">
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Greenshot.Base;component/Wpf/Styles/GreenshotStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+
+        <!-- Themed Fluent Navigation Item Style -->
+        <Style x:Key="NavListBoxItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Margin" Value="0,3,0,3"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <!-- Without a name a screen reader reads the view model class name, the badge is the status of the section -->
+            <Setter Property="AutomationProperties.Name" Value="{Binding Title, TargetNullValue=''}"/>
+            <Setter Property="AutomationProperties.ItemStatus" Value="{Binding BadgeText, TargetNullValue=''}"/>
+            <Setter Property="FocusVisualStyle" Value="{StaticResource GreenshotFocusVisual}"/>
+            <Setter Property="Foreground" Value="{Binding DataContext.TextPrimaryBrush, RelativeSource={RelativeSource AncestorType=Window}}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="itemBorder" 
+                                Background="Transparent" 
+                                BorderBrush="Transparent"
+                                BorderThickness="1"
+                                CornerRadius="6" 
+                                Padding="8,8">
+                            <Grid>
+                                <!-- Left Active Indicator Bar -->
+                                <Rectangle x:Name="activeIndicator" 
+                                           Width="3.5" 
+                                           HorizontalAlignment="Left" 
+                                           RadiusX="1.5" RadiusY="1.5"
+                                           Fill="{Binding DataContext.AccentBrush, RelativeSource={RelativeSource AncestorType=Window}}"
+                                           Visibility="Collapsed"/>
+                                <ContentPresenter Margin="6,0,0,0"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="itemBorder" Property="Background" Value="{Binding DataContext.BadgeBackgroundBrush, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="itemBorder" Property="Background" Value="{Binding DataContext.BadgeBackgroundBrush, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                <Setter TargetName="itemBorder" Property="BorderBrush" Value="{Binding DataContext.CardBorderBrush, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                <Setter TargetName="activeIndicator" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- The checksum rows: file name and status instead of the view model class name -->
+        <Style x:Key="ChecksumListViewItem" TargetType="{x:Type ListViewItem}" BasedOn="{StaticResource ThemeListViewItem}">
+            <Setter Property="AutomationProperties.Name" Value="{Binding RelativePath, TargetNullValue=''}"/>
+            <Setter Property="AutomationProperties.ItemStatus" Value="{Binding StatusText, TargetNullValue=''}"/>
+        </Style>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <!-- Title Bar -->
+            <RowDefinition Height="Auto"/>
+            <!-- Main Content (Master / Detail) -->
+            <RowDefinition Height="*"/>
+            <!-- Footer Status Bar -->
+            <RowDefinition Height="28"/>
+        </Grid.RowDefinitions>
+
+        <wpf:ThemedTitleBar Grid.Row="0" ShowThemeToggle="True"/>
+
+        <!-- Master / Detail Grid -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <!-- Master Column: Navigation Sidebar -->
+                <ColumnDefinition Width="250" MinWidth="220" MaxWidth="320"/>
+                <!-- Detail Column: Selected Section View -->
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Navigation Sidebar (Master) -->
+            <Border Grid.Column="0" 
+                    Background="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=ControlBackgroundBrush}" 
+                    BorderBrush="{Binding CardBorderBrush}" 
+                    BorderThickness="0,0,1,0" 
+                    Padding="12,14">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" 
+                               Text="{wpf:Text SelfService.CategoriesHeader}" 
+                               FontSize="{wpf:FontSize 11}" 
+                               FontWeight="Bold" 
+                               Foreground="{Binding TextSecondaryBrush}" 
+                               Margin="8,0,0,10"/>
+
+                    <ListBox Grid.Row="1" 
+                             ItemsSource="{Binding Sections}" 
+                             SelectedItem="{Binding SelectedSection, Mode=TwoWay}"
+                             ItemContainerStyle="{StaticResource NavListBoxItemStyle}"
+                             Foreground="{Binding TextPrimaryBrush}"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="{x:Type local:SelfServiceSectionViewModel}">
+                                <Grid Margin="4,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="34"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <!-- Themed Icon Container -->
+                                    <Border Grid.Column="0" 
+                                            Width="32" Height="32" 
+                                            CornerRadius="6" 
+                                            Background="{Binding DataContext.CardBackgroundBrush, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            BorderBrush="{Binding DataContext.CardBorderBrush, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            BorderThickness="1"
+                                            VerticalAlignment="Center" 
+                                            HorizontalAlignment="Center">
+                                        <TextBlock Text="{Binding Icon}" 
+                                                   FontSize="{wpf:FontSize 16}" 
+                                                   Foreground="{Binding DataContext.TextPrimaryBrush, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                   FontFamily="Segoe UI Emoji, Segoe UI Symbol, Segoe UI"
+                                                   VerticalAlignment="Center" 
+                                                   HorizontalAlignment="Center"/>
+                                    </Border>
+
+                                    <!-- Title & Subtitle with dynamic theme colors -->
+                                    <StackPanel Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Title}" 
+                                                   FontWeight="SemiBold" 
+                                                   FontSize="{wpf:FontSize 12.5}" 
+                                                   Foreground="{Binding DataContext.TextPrimaryBrush, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                        <TextBlock Text="{Binding Subtitle}" 
+                                                   FontSize="{wpf:FontSize 10.5}" 
+                                                   Foreground="{Binding DataContext.TextSecondaryBrush, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+
+                                    <!-- Status Badge -->
+                                    <Border Grid.Column="2" 
+                                            Visibility="{Binding HasBadge, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                            Background="{Binding BadgeBrush}" 
+                                            CornerRadius="10" 
+                                            Padding="6,2" 
+                                            VerticalAlignment="Center" 
+                                            Margin="4,0,0,0">
+                                        <TextBlock Text="{Binding BadgeText}" 
+                                                   FontSize="{wpf:FontSize 9.5}" 
+                                                   FontWeight="Bold" 
+                                                   Foreground="{Binding BadgeForeground}"/>
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <!-- Sidebar Footer Tips -->
+                    <Border Grid.Row="2" 
+                            Background="{Binding BadgeBackgroundBrush}" 
+                            BorderBrush="{Binding CardBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6" 
+                            Padding="10" 
+                            Margin="0,10,0,0">
+                        <StackPanel>
+                            <TextBlock Text="{wpf:Text SelfService.SidebarNavigationHeader}" FontWeight="SemiBold" FontSize="{wpf:FontSize 11}" Margin="0,0,0,4" Foreground="{Binding TextPrimaryBrush}"/>
+                            <TextBlock Text="{wpf:Text SelfService.SidebarNavigationTip}" 
+                                       FontSize="{wpf:FontSize 10.5}" 
+                                       TextWrapping="Wrap" 
+                                       Foreground="{Binding TextSecondaryBrush}"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <!-- Detail View Panel (Right Column) -->
+            <Grid Grid.Column="1" Background="{Binding WindowBackgroundBrush}">
+                <!-- Section 1: System & Environment -->
+                <ScrollViewer x:Name="SystemInfoPanel" 
+                              VerticalScrollBarVisibility="Auto" 
+                              Padding="22,18">
+                    <StackPanel>
+                        <!-- Section Header -->
+                        <Grid Margin="0,0,0,16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="{wpf:Text SelfService.SystemTitle}" 
+                                           FontSize="{wpf:FontSize 18}" 
+                                           FontWeight="SemiBold" 
+                                           Foreground="{Binding TextPrimaryBrush}"/>
+                                <TextBlock Text="{wpf:Text SelfService.SystemSub}" 
+                                           FontSize="{wpf:FontSize 12}" 
+                                           Foreground="{Binding TextSecondaryBrush}" 
+                                           Margin="0,3,0,0"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button AutomationProperties.Name="{wpf:Text SelfService.BtnRefresh}" Style="{StaticResource SecondaryButtonStyle}" 
+                                        Margin="0,0,8,0" 
+                                        Click="OnRefreshCurrentSectionClicked">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="🔄 "/>
+                                        <TextBlock Text="{wpf:Text SelfService.BtnRefresh}"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button AutomationProperties.Name="{wpf:Text SelfService.BtnCopySysinfo}" Style="{StaticResource PrimaryButtonStyle}" 
+                                        Click="OnCopySystemInfoClicked">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="📋 "/>
+                                        <TextBlock Text="{wpf:Text SelfService.BtnCopySysinfo}"/>
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- Memory & Resource Cards Grid -->
+                        <Grid Margin="0,0,0,14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Process Working Set Card -->
+                            <Border Grid.Column="0" Style="{StaticResource CardStyle}" Margin="0,0,8,0">
+                                <StackPanel>
+                                    <TextBlock Text="{wpf:Text SelfService.SysMemoryProcess}" FontSize="{wpf:FontSize 10.5}" FontWeight="Bold" Foreground="{Binding TextSecondaryBrush}"/>
+                                    <TextBlock Text="{Binding SystemInfoSection.WorkingSetText}" FontSize="{wpf:FontSize 18}" FontWeight="Bold" Margin="0,6,0,2"/>
+                                    <TextBlock FontSize="{wpf:FontSize 11}" Foreground="{Binding TextSecondaryBrush}"><Run Text="{wpf:Text SelfService.SysPeak}"/><Run Text=" "/><Run Text="{Binding SystemInfoSection.PeakWorkingSetText, Mode=OneWay}"/></TextBlock>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Managed GC Heap Card -->
+                            <Border Grid.Column="1" Style="{StaticResource CardStyle}" Margin="4,0,4,0">
+                                <StackPanel>
+                                    <TextBlock Text="{wpf:Text SelfService.SysMemoryGc}" FontSize="{wpf:FontSize 10.5}" FontWeight="Bold" Foreground="{Binding TextSecondaryBrush}"/>
+                                    <TextBlock Text="{Binding SystemInfoSection.GcMemoryText}" FontSize="{wpf:FontSize 18}" FontWeight="Bold" Margin="0,6,0,2"/>
+                                    <TextBlock FontSize="{wpf:FontSize 11}" Foreground="{Binding TextSecondaryBrush}"><Run Text="{wpf:Text SelfService.SysPrivate}"/><Run Text=" "/><Run Text="{Binding SystemInfoSection.PrivateMemoryText, Mode=OneWay}"/></TextBlock>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- System RAM Card -->
+                            <Border Grid.Column="2" Style="{StaticResource CardStyle}" Margin="8,0,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="{wpf:Text SelfService.SysMemoryRam}" FontSize="{wpf:FontSize 10.5}" FontWeight="Bold" Foreground="{Binding TextSecondaryBrush}"/>
+                                    <TextBlock Text="{Binding SystemInfoSection.SystemMemoryText}" FontSize="{wpf:FontSize 14}" FontWeight="Bold" Margin="0,6,0,2"/>
+                                    <TextBlock FontSize="{wpf:FontSize 11}" Foreground="{Binding TextSecondaryBrush}"><Run Text="{wpf:Text SelfService.SysMemoryLoad}"/><Run Text=" "/><Run Text="{Binding SystemInfoSection.MemoryLoadText, Mode=OneWay}"/></TextBlock>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <!-- Process Status Bar Card -->
+                        <Border Style="{StaticResource CardStyle}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="⚡ " FontSize="{wpf:FontSize 14}" Margin="0,0,4,0"/>
+                                    <TextBlock Text="{Binding SystemInfoSection.ProcessStatsText}" FontWeight="SemiBold" FontSize="{wpf:FontSize 12}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="{wpf:Text SelfService.SysUptimeLabel}" FontSize="{wpf:FontSize 11.5}" Foreground="{Binding TextSecondaryBrush}"/>
+                                    <TextBlock Text="{Binding SystemInfoSection.UptimeText}" FontWeight="SemiBold" FontSize="{wpf:FontSize 11.5}"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- Full Diagnostic Text Viewer Card -->
+                        <Border Style="{StaticResource CardStyle}" Padding="12">
+                            <StackPanel>
+                                <TextBlock Text="{wpf:Text SelfService.SysReportTitle}" FontWeight="SemiBold" FontSize="{wpf:FontSize 12.5}" Margin="0,0,0,8"/>
+                                <Border Background="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=TextBoxBackgroundBrush}" 
+                                        BorderBrush="{Binding CardBorderBrush}" 
+                                        BorderThickness="1" 
+                                        CornerRadius="4" 
+                                        Padding="2">
+                                    <TextBox Text="{Binding SystemInfoSection.EnvironmentReport, Mode=OneWay}"
+                                             AutomationProperties.Name="{wpf:Text SelfService.SysReportTitle}"
+                                             IsReadOnly="True"
+                                             TextWrapping="NoWrap"
+                                             AcceptsReturn="True"
+                                             VerticalScrollBarVisibility="Auto"
+                                             HorizontalScrollBarVisibility="Auto"
+                                             Height="240"
+                                             FontFamily="Consolas, Cascadia Code, Courier New"
+                                             FontSize="{wpf:FontSize 11.5}"
+                                             BorderThickness="0"
+                                             Background="Transparent"
+                                             Foreground="{Binding TextPrimaryBrush}"
+                                             Padding="8"/>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Your setup: the same checks as the "Your setup" step of the welcome window (SetupSectionViewModel) -->
+                <ScrollViewer x:Name="SetupPanel"
+                              VerticalScrollBarVisibility="Auto"
+                              Padding="22,18"
+                              Visibility="Collapsed">
+                    <StackPanel>
+                        <StackPanel Margin="0,0,0,16">
+                            <TextBlock Text="{wpf:Text Welcome.SetupTitle}" FontSize="{wpf:FontSize 18}" FontWeight="SemiBold" Foreground="{Binding TextPrimaryBrush}"/>
+                            <TextBlock Text="{wpf:Text Welcome.SetupSub}" FontSize="{wpf:FontSize 12}" Foreground="{Binding TextSecondaryBrush}" Margin="0,3,0,0"/>
+                        </StackPanel>
+                        <Border Style="{StaticResource CardStyle}">
+                            <StackPanel>
+                                <TextBlock Visibility="{Binding SetupSection.VersionPendingVisibility}" Text="{Binding SetupSection.VersionText}" Foreground="{Binding TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                                <TextBlock Visibility="{Binding SetupSection.VersionOkVisibility}" TextWrapping="Wrap" Margin="0,0,0,8">
+                                    <Run Text="✓ " Foreground="{Binding AccentBrush}" FontWeight="Bold"/><Run Text="{Binding SetupSection.VersionText, Mode=OneWay}"/>
+                                </TextBlock>
+                                <Grid Visibility="{Binding SetupSection.VersionOldVisibility}" Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{Binding SetupSection.VersionText}" Foreground="{Binding WarningTextBrush}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                    <Button Grid.Column="1" Style="{StaticResource WarnButtonStyle}" Click="OnDownloadClicked" VerticalAlignment="Center">
+                                        <TextBlock Text="{wpf:Text Welcome.SetupVersionDownload}"/>
+                                    </Button>
+                                </Grid>
+                                <TextBlock Visibility="{Binding SetupSection.TrayIconOkVisibility}" TextWrapping="Wrap" Margin="0,0,0,8">
+                                    <Run Text="✓ " Foreground="{Binding AccentBrush}" FontWeight="Bold"/><Run Text="{wpf:Text Welcome.SetupTrayOk}"/>
+                                </TextBlock>
+                                <Grid Visibility="{Binding SetupSection.TrayIconHiddenVisibility}" Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{wpf:Text Welcome.SetupTrayHidden}" Foreground="{Binding WarningTextBrush}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                    <Button Grid.Column="1" Style="{StaticResource WarnButtonStyle}" Click="OnShowTrayIconClicked" VerticalAlignment="Center">
+                                        <TextBlock Text="{wpf:Text Welcome.SetupTrayFix}"/>
+                                    </Button>
+                                </Grid>
+                                <TextBlock Visibility="{Binding SetupSection.PrintKeyOkVisibility}" TextWrapping="Wrap" Margin="0,0,0,8">
+                                    <Run Text="✓ " Foreground="{Binding AccentBrush}" FontWeight="Bold"/><Run Text="{wpf:Text Welcome.SetupPrintOk}"/>
+                                </TextBlock>
+                                <Grid Visibility="{Binding SetupSection.SnippingToolVisibility}" Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{wpf:Text Welcome.SetupSnipping}" Foreground="{Binding WarningTextBrush}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                    <Button Grid.Column="1" Style="{StaticResource WarnButtonStyle}" Click="OnFixSetupSnippingToolClicked" VerticalAlignment="Center">
+                                        <TextBlock Text="{wpf:Text Welcome.SetupSnippingFix}"/>
+                                    </Button>
+                                </Grid>
+                                <Grid Visibility="{Binding SetupSection.OneDriveVisibility}" Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{wpf:Text Welcome.SetupOnedrive}" Foreground="{Binding WarningTextBrush}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                    <Button Grid.Column="1" Style="{StaticResource WarnButtonStyle}" Click="OnFixSetupOneDriveClicked" VerticalAlignment="Center">
+                                        <TextBlock Text="{wpf:Text Welcome.SetupOnedriveFix}"/>
+                                    </Button>
+                                </Grid>
+                                <!-- The same switch as in the settings: only this user's own entry, see docs/vNext/autostart.md -->
+                                <CheckBox Content="{wpf:Text Settings.Autostartshortcut}" IsChecked="{Binding SetupSection.IsAutostartEnabled, Mode=TwoWay}" Margin="0,4,0,0"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Section 2: Files & Logs -->
+                <ScrollViewer x:Name="FileInfoPanel" 
+                              VerticalScrollBarVisibility="Auto" 
+                              Padding="22,18">
+                    <StackPanel>
+                        <!-- Section Header -->
+                        <Grid Margin="0,0,0,16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="{wpf:Text SelfService.FilesTitle}" 
+                                           FontSize="{wpf:FontSize 18}" 
+                                           FontWeight="SemiBold" 
+                                           Foreground="{Binding TextPrimaryBrush}"/>
+                                <TextBlock Text="{wpf:Text SelfService.FilesSub}" 
+                                           FontSize="{wpf:FontSize 12}" 
+                                           Foreground="{Binding TextSecondaryBrush}" 
+                                           Margin="0,3,0,0"/>
+                            </StackPanel>
+                            <Button AutomationProperties.Name="{wpf:Text SelfService.BtnRefresh}" Grid.Column="1" 
+                                    Style="{StaticResource SecondaryButtonStyle}" 
+                                    Click="OnRefreshCurrentSectionClicked">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="🔄 "/>
+                                    <TextBlock Text="{wpf:Text SelfService.BtnRefresh}"/>
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+
+                        <!-- Screenshot Folder Card: where Greenshot saves, and why screenshots "disappear" -->
+                        <Border Style="{StaticResource CardStyle}">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <TextBlock Text="🖼️ " FontSize="{wpf:FontSize 15}" Margin="0,0,4,0"/>
+                                    <TextBlock Text="{wpf:Text SelfService.FilesOutputTitle}" FontWeight="SemiBold" FontSize="{wpf:FontSize 13}"/>
+                                </StackPanel>
+
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{wpf:Text SelfService.FilesOutputConfigured}" FontSize="{wpf:FontSize 11.5}" Foreground="{Binding TextSecondaryBrush}" Margin="0,0,10,4"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding FileInfoSection.OutputConfiguredPath}" FontFamily="Consolas, monospace" FontSize="{wpf:FontSize 11.5}" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="{wpf:Text SelfService.FilesOutputExpanded}" FontSize="{wpf:FontSize 11.5}" Foreground="{Binding TextSecondaryBrush}" Margin="0,0,10,4"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding FileInfoSection.OutputExpandedPath}" FontFamily="Consolas, monospace" FontSize="{wpf:FontSize 11.5}" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="{wpf:Text SelfService.FilesOutputExample}" FontSize="{wpf:FontSize 11.5}" Foreground="{Binding TextSecondaryBrush}" Margin="0,0,10,0"
+                                               Visibility="{Binding FileInfoSection.HasOutputExampleFile, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding FileInfoSection.OutputExampleFile}" FontFamily="Consolas, monospace" FontSize="{wpf:FontSize 11.5}" TextWrapping="Wrap"
+                                               Visibility="{Binding FileInfoSection.HasOutputExampleFile, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                </Grid>
+
+                                <!-- The findings of the check -->
+                                <ItemsControl ItemsSource="{Binding FileInfoSection.OutputChecks}" Margin="0,0,0,10">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,2">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Icon}" Margin="0,0,6,0"/>
+                                                <TextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" FontSize="{wpf:FontSize 12}"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <WrapPanel>
+                                    <Button AutomationProperties.Name="{wpf:Text SelfService.BtnOpenFolder}" Style="{StaticResource SecondaryButtonStyle}" Click="OnOpenOutputFolderClicked" Margin="0,0,6,6">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="📂 "/>
+                                            <TextBlock Text="{wpf:Text SelfService.BtnOpenFolder}"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button AutomationProperties.Name="{wpf:Text SelfService.BtnCopyPath}" Style="{StaticResource SecondaryButtonStyle}" Click="OnCopyOutputPathClicked" Margin="0,0,6,6">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="📋 "/>
+                                            <TextBlock Text="{wpf:Text SelfService.BtnCopyPath}"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button AutomationProperties.Name="{wpf:Text SelfService.BtnResetOutputPath}" Style="{StaticResource SecondaryButtonStyle}" Click="OnResetOutputPathClicked" Margin="0,0,6,6">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="↩️ "/>
+                                            <TextBlock Text="{wpf:Text SelfService.BtnResetOutputPath}"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button AutomationProperties.Name="{wpf:Text SelfService.BtnResetFilenamePattern}" Style="{StaticResource SecondaryButtonStyle}" Click="OnResetFilenamePatternClicked" Margin="0,0,6,6">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="↩️ "/>
+                                            <TextBlock Text="{wpf:Text SelfService.BtnResetFilenamePattern}"/>
+                                        </StackPanel>
+                                    </Button>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Log File Card -->
+                        <Border Style="{StaticResource CardStyle}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <!-- Card Header -->
+                                <Grid Grid.Row="0" Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="📄 " FontSize="{wpf:FontSize 15}" Margin="0,0,4,0"/>
+                                        <TextBlock Text="{wpf:Text SelfService.FilesLogfileTitle}" FontWeight="SemiBold" FontSize="{wpf:FontSize 13}"/>
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="{Binding FileInfoSection.LogFileSizeText}" FontSize="{wpf:FontSize 11}" Foreground="{Binding TextSecondaryBrush}"/>
+                                </Grid>
+
+                                <!-- Path Display -->
+                                <Border Grid.Row="1" 
+                                        Background="{Binding BadgeBackgroundBrush}" 
+                                        BorderBrush="{Binding CardBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="4" 
+                                        Padding="10,6" 
+                                        Margin="0,0,0,10">
+                                    <TextBlock Text="{Binding FileInfoSection.LogFilePath}" 
+                                               FontFamily="Consolas, monospace" 
+                                               FontSize="{wpf:FontSize 11.5}" 
+                                               TextWrapping="Wrap"/>
+                                </Border>
+
+                                <!-- Actions: Copy Path -->
+                                <StackPanel Grid.Row="2" Orientation="Horizontal">
+                                    <Button AutomationProperties.Name="{wpf:Text SelfService.BtnCopyPath}" Style="{StaticResource SecondaryButtonStyle}" 
+                                            Click="OnCopyLogPathClicked">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="📋 "/>
+                                            <TextBlock Text="{wpf:Text SelfService.BtnCopyPath}"/>
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- Config File Card -->
+                        <Border Style="{StaticResource CardStyle}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <!-- Card Header -->
+                                <Grid Grid.Row="0" Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="⚙️ " FontSize="{wpf:FontSize 15}" Margin="0,0,4,0"/>
+                                        <TextBlock Text="{wpf:Text SelfService.FilesInifileTitle}" FontWeight="SemiBold" FontSize="{wpf:FontSize 13}"/>
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="{Binding FileInfoSection.ConfigFileSizeText}" FontSize="{wpf:FontSize 11}" Foreground="{Binding TextSecondaryBrush}"/>
+                                </Grid>
+
+                                <!-- Path Display -->
+                                <Border Grid.Row="1" 
+                                        Background="{Binding BadgeBackgroundBrush}" 
+                                        BorderBrush="{Binding CardBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="4" 
+                                        Padding="10,6" 
+                                        Margin="0,0,0,10">
+                                    <TextBlock Text="{Binding FileInfoSection.ConfigFilePath}" 
+                                               FontFamily="Consolas, monospace" 
+                                               FontSize="{wpf:FontSize 11.5}" 
+                                               TextWrapping="Wrap"/>
+                                </Border>
+
+                                <!-- Actions: Copy Path -->
+                                <StackPanel Grid.Row="2" Orientation="Horizontal">
+                                    <Button AutomationProperties.Name="{wpf:Text SelfService.BtnCopyPath}" Style="{StaticResource SecondaryButtonStyle}" 
+                                            Click="OnCopyConfigPathClicked">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="📋 "/>
+                                            <TextBlock Text="{wpf:Text SelfService.BtnCopyPath}"/>
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- Log Quick Glance Card with Magnify Glass Button -->
+                        <Border Style="{StaticResource CardStyle}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <Grid Grid.Row="0" Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="🔍 " FontSize="{wpf:FontSize 15}" Margin="0,0,4,0"/>
+                                        <TextBlock Text="{wpf:Text SelfService.FilesQuickglanceTitle}" 
+                                                   FontWeight="SemiBold" 
+                                                   FontSize="{wpf:FontSize 13}"/>
+                                    </StackPanel>
+                                    <!-- Magnifying Glass Button to open full log in separate window -->
+                                    <Button AutomationProperties.Name="{wpf:Text SelfService.BtnOpenLogviewer}" Grid.Column="1" 
+                                            Style="{StaticResource PrimaryButtonStyle}" 
+                                            Click="OnOpenLogViewerClicked" 
+                                            ToolTip="{wpf:Text SelfService.TooltipOpenLogviewer}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="🔍 " FontSize="{wpf:FontSize 12}"/>
+                                            <TextBlock Text="{wpf:Text SelfService.BtnOpenLogviewer}"/>
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+
+                                <TextBlock Grid.Row="1" 
+                                           Text="{wpf:Text SelfService.FilesQuickglanceDesc}" 
+                                           FontSize="{wpf:FontSize 11.5}" 
+                                           Foreground="{Binding TextSecondaryBrush}" 
+                                           Margin="0,0,0,8"/>
+
+                                <!-- Brief Preview snippet box -->
+                                <Border Grid.Row="2" 
+                                        Background="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=TextBoxBackgroundBrush}" 
+                                        BorderBrush="{Binding CardBorderBrush}" 
+                                        BorderThickness="1" 
+                                        CornerRadius="4" 
+                                        MaxHeight="80" 
+                                        Padding="6">
+                                    <TextBlock Text="{Binding FileInfoSection.RecentLogContent}" 
+                                               FontFamily="Consolas, monospace" 
+                                               FontSize="{wpf:FontSize 11}" 
+                                               Foreground="{Binding TextSecondaryBrush}" 
+                                               TextTrimming="CharacterEllipsis"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Section 3: Clipboard Diagnostics -->
+                <ScrollViewer x:Name="ClipboardPanel" 
+                              VerticalScrollBarVisibility="Auto" 
+                              Padding="22,18">
+                    <StackPanel>
+                        <!-- Section Header -->
+                        <Grid Margin="0,0,0,16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="{wpf:Text SelfService.ClipboardTitle}" 
+                                           FontSize="{wpf:FontSize 18}" 
+                                           FontWeight="SemiBold" 
+                                           Foreground="{Binding TextPrimaryBrush}"/>
+                                <TextBlock Text="{wpf:Text SelfService.ClipboardSub}" 
+                                           FontSize="{wpf:FontSize 12}" 
+                                           Foreground="{Binding TextSecondaryBrush}" 
+                                           Margin="0,3,0,0"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button AutomationProperties.Name="{wpf:Text SelfService.ClipboardRefresh}" Style="{StaticResource SecondaryButtonStyle}" 
+                                        Margin="0,0,8,0" 
+                                        Click="OnRefreshCurrentSectionClicked">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="🔄 "/>
+                                        <TextBlock Text="{wpf:Text SelfService.ClipboardRefresh}"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button AutomationProperties.Name="{wpf:Text SelfService.ClipboardTestNow}" Style="{StaticResource PrimaryButtonStyle}" 
+                                        Click="OnCheckClipboardNowClicked">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="🔍 "/>
+                                        <TextBlock Text="{wpf:Text SelfService.ClipboardTestNow}"/>
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- Blocker Status Alert Card -->
+                        <Border Style="{StaticResource CardStyle}" 
+                                BorderBrush="{Binding ClipboardSection.StatusBrush}" 
+                                BorderThickness="1.5">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <!-- Header Status -->
+                                <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,6">
+                                    <TextBlock Text="🛡️ " FontSize="{wpf:FontSize 16}" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding ClipboardSection.StatusHeader}" 
+                                               FontSize="{wpf:FontSize 14}" 
+                                               FontWeight="Bold" 
+                                               Foreground="{Binding ClipboardSection.StatusBrush}" 
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+
+                                <!-- Details -->
+                                <TextBlock Grid.Row="1" 
+                                           Text="{Binding ClipboardSection.StatusDetails}" 
+                                           FontSize="{wpf:FontSize 12}" 
+                                           TextWrapping="Wrap" 
+                                           Foreground="{Binding TextSecondaryBrush}" 
+                                           Margin="24,0,0,8"/>
+
+                                <!-- Blocker Details Box (if blocked) -->
+                                <Border Grid.Row="2" 
+                                        Visibility="{Binding ClipboardSection.IsBlockedVisibility}" 
+                                        Background="{Binding BadgeBackgroundBrush}" 
+                                        BorderBrush="{Binding CardBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6" 
+                                        Padding="10" 
+                                        Margin="0,4,0,0">
+                                    <StackPanel>
+                                        <TextBlock Text="{wpf:Text SelfService.ClipboardLockingProcess}" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                        <TextBlock FontFamily="Consolas"><Run Text="{wpf:Text SelfService.ClipboardLabelProcessName}"/><Run Text="{Binding ClipboardSection.BlockerProcessName, Mode=OneWay}"/></TextBlock>
+                                        <TextBlock FontFamily="Consolas"><Run Text="{wpf:Text SelfService.ClipboardLabelPid}"/><Run Text="{Binding ClipboardSection.BlockerProcessId, Mode=OneWay}"/></TextBlock>
+                                        <TextBlock FontFamily="Consolas"><Run Text="{wpf:Text SelfService.ClipboardLabelWindowTitle}"/><Run Text="{Binding ClipboardSection.BlockerWindowTitle, Mode=OneWay}"/></TextBlock>
+                                        <TextBlock FontFamily="Consolas" TextWrapping="Wrap" FontWeight="SemiBold"><Run Text="{wpf:Text SelfService.ClipboardLabelExecutable}"/><Run Text="{Binding ClipboardSection.BlockerExecutablePath, Mode=OneWay}"/></TextBlock>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Owner Details Box (when accessible) -->
+                                <Border Grid.Row="3" 
+                                        Visibility="{Binding ClipboardSection.IsAccessibleVisibility}" 
+                                        Background="{Binding BadgeBackgroundBrush}" 
+                                        BorderBrush="{Binding CardBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6" 
+                                        Padding="10" 
+                                        Margin="0,4,0,0">
+                                    <StackPanel>
+                                        <TextBlock Text="{wpf:Text SelfService.ClipboardDataOwner}" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                        <TextBlock Text="{Binding ClipboardSection.CurrentOwnerInfo, Mode=OneWay}" FontFamily="Consolas" FontSize="{wpf:FontSize 11.5}"/>
+                                        <TextBlock FontFamily="Consolas" FontSize="{wpf:FontSize 11}" Foreground="{Binding TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,2,0,0"><Run Text="{wpf:Text SelfService.ClipboardLabelPath}"/><Run Text="{Binding ClipboardSection.OwnerExecutablePath, Mode=OneWay}"/></TextBlock>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- Live Diagnostic Loop Card -->
+                        <Border Style="{StaticResource CardStyle}">
+                            <StackPanel>
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="{wpf:Text SelfService.ClipboardLoopTitle}" FontWeight="SemiBold" FontSize="{wpf:FontSize 13}"/>
+                                        <TextBlock Text="{wpf:Text SelfService.ClipboardLoopDesc}" 
+                                                   FontSize="{wpf:FontSize 11.5}" 
+                                                   Foreground="{Binding TextSecondaryBrush}"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <Button Style="{StaticResource PrimaryButtonStyle}" 
+                                                Margin="0,0,6,0" 
+                                                Click="OnToggleMonitoringClicked">
+                                            <TextBlock Text="{Binding ClipboardSection.MonitorToggleText}"/>
+                                        </Button>
+                                        <Button Style="{StaticResource SecondaryButtonStyle}" 
+                                                Click="OnClearClipboardLogClicked">
+                                            <TextBlock Text="{wpf:Text SelfService.ClipboardBtnClearLog}"/>
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- Event Log Items -->
+                                <Border Background="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=TextBoxBackgroundBrush}" 
+                                        BorderBrush="{Binding CardBorderBrush}" 
+                                        BorderThickness="1" 
+                                        CornerRadius="4" 
+                                        MaxHeight="160">
+                                    <ListBox ItemsSource="{Binding ClipboardSection.MonitorLog}" 
+                                             AutomationProperties.Name="{wpf:Text SelfService.ClipboardLoopTitle}"
+                                             Background="Transparent" 
+                                             BorderThickness="0" 
+                                             ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type local:ClipboardMonitorEvent}">
+                                                <Grid Margin="2,1">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="90"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Column="0" 
+                                                               Text="{Binding Timestamp}" 
+                                                               FontFamily="Consolas" 
+                                                               FontSize="{wpf:FontSize 10.5}" 
+                                                               Foreground="{Binding DataContext.TextSecondaryBrush, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                                        <TextBlock Text="{Binding Message}" 
+                                                            FontWeight="SemiBold" 
+                                                            FontSize="{wpf:FontSize 11.5}" 
+                                                            Foreground="{Binding StatusBrush}" 
+                                                            Margin="0,0,8,0"/>
+                                                        <TextBlock Text="{Binding ProcessDetails}" 
+                                                            FontSize="{wpf:FontSize 10.5}" 
+                                                            Foreground="{Binding DataContext.TextSecondaryBrush, RelativeSource={RelativeSource AncestorType=Window}}" 
+                                                            TextTrimming="CharacterEllipsis"/>
+                                                    </StackPanel>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                        <ListBox.ItemContainerStyle>
+                                            <Style TargetType="ListBoxItem">
+                                                <!-- Read the event instead of the class name -->
+                                                <Setter Property="AutomationProperties.Name" Value="{Binding Message, TargetNullValue=''}"/>
+                                                <Setter Property="AutomationProperties.HelpText" Value="{Binding ProcessDetails, TargetNullValue=''}"/>
+                                                <Setter Property="FocusVisualStyle" Value="{StaticResource GreenshotFocusVisual}"/>
+                                            </Style>
+                                        </ListBox.ItemContainerStyle>
+                                    </ListBox>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Formats on Clipboard Card -->
+                        <Border Style="{StaticResource CardStyle}">
+                            <StackPanel>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{wpf:Text SelfService.ClipboardFormatsTitle}" FontWeight="SemiBold" FontSize="{wpf:FontSize 13}" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="1" Text="{wpf:Text SelfService.ClipboardFormatsSub}" FontSize="{wpf:FontSize 10.5}" Foreground="{Binding TextSecondaryBrush}" VerticalAlignment="Center"/>
+                                </Grid>
+                                <ItemsControl ItemsSource="{Binding ClipboardSection.Formats}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type local:ClipboardFormatItemViewModel}">
+                                            <Border Background="{Binding DataContext.BadgeBackgroundBrush, RelativeSource={RelativeSource AncestorType=Window}}" 
+                                                    BorderBrush="{Binding DataContext.CardBorderBrush, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="4" 
+                                                    Padding="10,6" 
+                                                    Margin="0,0,0,6">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="180"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel Grid.Column="0">
+                                                        <TextBlock Text="{Binding Name}" FontWeight="Bold" FontFamily="Consolas" FontSize="{wpf:FontSize 12}"/>
+                                                        <TextBlock Text="{Binding TypeDescription}" FontSize="{wpf:FontSize 10.5}" Foreground="{Binding DataContext.TextSecondaryBrush, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                    </StackPanel>
+                                                    <TextBlock Grid.Column="1" 
+                                                               Text="{Binding Details}" 
+                                                               FontSize="{wpf:FontSize 11.5}" 
+                                                               VerticalAlignment="Center" 
+                                                               Margin="8,0" 
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Grid.Column="2" 
+                                                               Text="{Binding SizeText}" 
+                                                               FontSize="{wpf:FontSize 11}" 
+                                                               FontFamily="Consolas" 
+                                                               VerticalAlignment="Center" 
+                                                               Foreground="{Binding DataContext.TextSecondaryBrush, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Section 4: Hotkeys & Conflicts -->
+                <ScrollViewer x:Name="HotkeysPanel" 
+                              VerticalScrollBarVisibility="Auto" 
+                              Padding="22,18">
+                    <StackPanel>
+                        <!-- Section Header -->
+                        <Grid Margin="0,0,0,16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="{wpf:Text SelfService.HotkeysTitle}" 
+                                           FontSize="{wpf:FontSize 18}" 
+                                           FontWeight="SemiBold" 
+                                           Foreground="{Binding TextPrimaryBrush}"/>
+                                <TextBlock Text="{wpf:Text SelfService.HotkeysSub}" 
+                                           FontSize="{wpf:FontSize 12}" 
+                                           Foreground="{Binding TextSecondaryBrush}" 
+                                           Margin="0,3,0,0"/>
+                            </StackPanel>
+                            <Button AutomationProperties.Name="{wpf:Text SelfService.HotkeysBtnReregister}" Grid.Column="1" 
+                                    Style="{StaticResource PrimaryButtonStyle}" 
+                                    Click="OnReRegisterHotkeysClicked">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="🔄 "/>
+                                    <TextBlock Text="{wpf:Text SelfService.HotkeysBtnReregister}"/>
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+
+                        <!-- Greenshot Registered Hotkeys Card -->
+                        <Border Style="{StaticResource CardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{wpf:Text SelfService.HotkeysConfiguredTitle}" FontWeight="SemiBold" FontSize="{wpf:FontSize 13}" Margin="0,0,0,8"/>
+                                <ItemsControl ItemsSource="{Binding HotkeySection.Hotkeys}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type local:HotkeyStatusItemViewModel}">
+                                            <Border Background="{Binding DataContext.BadgeBackgroundBrush, RelativeSource={RelativeSource AncestorType=Window}}" 
+                                                    BorderBrush="{Binding DataContext.CardBorderBrush, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="4" 
+                                                    Padding="10,6" 
+                                                    Margin="0,0,0,6">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="180"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Column="0" Text="{Binding ActionName}" FontWeight="SemiBold" FontSize="{wpf:FontSize 12.5}" VerticalAlignment="Center"/>
+                                                    <Border Grid.Column="1" 
+                                                            Background="{Binding DataContext.CardBackgroundBrush, RelativeSource={RelativeSource AncestorType=Window}}" 
+                                                            BorderBrush="{Binding DataContext.CardBorderBrush, RelativeSource={RelativeSource AncestorType=Window}}" 
+                                                            BorderThickness="1" 
+                                                            CornerRadius="4" 
+                                                            Padding="8,2" 
+                                                            HorizontalAlignment="Left" 
+                                                            VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding HotkeyText}" FontFamily="Consolas" FontWeight="Bold" FontSize="{wpf:FontSize 12}"/>
+                                                    </Border>
+                                                    <TextBlock Grid.Column="2" 
+                                                               Text="{Binding StatusText}" 
+                                                               Foreground="{Binding StatusBrush}" 
+                                                               FontWeight="SemiBold" 
+                                                               FontSize="{wpf:FontSize 11.5}" 
+                                                               VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- OneDrive Fix Card -->
+                        <Border Style="{StaticResource CardStyle}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Grid Grid.Row="0" Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="☁️ " FontSize="{wpf:FontSize 15}" Margin="0,0,4,0"/>
+                                        <TextBlock Text="{wpf:Text SelfService.HotkeysOnedriveTitle}" FontWeight="SemiBold" FontSize="{wpf:FontSize 13}"/>
+                                    </StackPanel>
+                                    <Button Grid.Column="1" 
+                                            Visibility="{Binding HotkeySection.OneDriveFixButtonVisibility}"
+                                            Style="{StaticResource WarnButtonStyle}"
+                                            Click="OnDisableOneDriveHotkeyClicked">
+                                        <TextBlock Text="{wpf:Text SelfService.HotkeysOnedriveDisableBtn}"/>
+                                    </Button>
+                                </Grid>
+                                <TextBlock Grid.Row="1" 
+                                           Text="{Binding HotkeySection.OneDriveStatusText}" 
+                                           Foreground="{Binding HotkeySection.OneDriveStatusBrush}" 
+                                           FontWeight="SemiBold" 
+                                           FontSize="{wpf:FontSize 12}" 
+                                           Margin="0,0,0,4"/>
+                                <TextBlock Grid.Row="2" 
+                                           Text="{wpf:Text SelfService.HotkeysOnedriveDesc}" 
+                                           FontSize="{wpf:FontSize 11}" 
+                                           TextWrapping="Wrap" 
+                                           Foreground="{Binding TextSecondaryBrush}"/>
+                            </Grid>
+                        </Border>
+
+                        <!-- Windows Snipping Tool Fix Card -->
+                        <Border Style="{StaticResource CardStyle}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Grid Grid.Row="0" Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="🪟 " FontSize="{wpf:FontSize 15}" Margin="0,0,4,0"/>
+                                        <TextBlock Text="{wpf:Text SelfService.HotkeysSnippingTitle}" FontWeight="SemiBold" FontSize="{wpf:FontSize 13}"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <Button Visibility="{Binding HotkeySection.SnippingToolFixButtonVisibility}"
+                                                Style="{StaticResource WarnButtonStyle}"
+                                                Margin="0,0,6,0" 
+                                                Click="OnDisableSnippingToolTakeoverClicked">
+                                            <TextBlock Text="{wpf:Text SelfService.HotkeysSnippingDisableBtn}"/>
+                                        </Button>
+                                        <Button Style="{StaticResource SecondaryButtonStyle}" 
+                                                Click="OnOpenWindowsKeyboardSettingsClicked">
+                                            <TextBlock Text="{wpf:Text SelfService.HotkeysSnippingSettingsBtn}"/>
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock Grid.Row="1" 
+                                           Text="{Binding HotkeySection.SnippingToolStatusText}" 
+                                           Foreground="{Binding HotkeySection.SnippingToolStatusBrush}" 
+                                           FontWeight="SemiBold" 
+                                           FontSize="{wpf:FontSize 12}" 
+                                           Margin="0,0,0,4"/>
+                                <TextBlock Grid.Row="2" 
+                                           Text="{wpf:Text SelfService.HotkeysSnippingDesc}" 
+                                           FontSize="{wpf:FontSize 11}" 
+                                           TextWrapping="Wrap" 
+                                           Foreground="{Binding TextSecondaryBrush}"/>
+                            </Grid>
+                        </Border>
+
+                        <!-- Dropbox Guidance Card -->
+                        <Border Style="{StaticResource CardStyle}">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                    <TextBlock Text="📦 " FontSize="{wpf:FontSize 15}" Margin="0,0,4,0"/>
+                                    <TextBlock Text="{wpf:Text SelfService.HotkeysDropboxTitle}" FontWeight="SemiBold" FontSize="{wpf:FontSize 13}"/>
+                                </StackPanel>
+                                <TextBlock Text="{Binding HotkeySection.DropboxStatusText}" 
+                                           Foreground="{Binding HotkeySection.DropboxStatusBrush}" 
+                                           FontWeight="SemiBold" 
+                                           FontSize="{wpf:FontSize 12}" 
+                                           Margin="0,0,0,4"/>
+                                <TextBlock Text="{wpf:Text SelfService.HotkeysDropboxDesc}" 
+                                           FontSize="{wpf:FontSize 11}" 
+                                           TextWrapping="Wrap" 
+                                           Foreground="{Binding TextSecondaryBrush}"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Contender Apps Detection Card -->
+                        <Border Style="{StaticResource CardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{wpf:Text SelfService.HotkeysOtherTitle}" FontWeight="SemiBold" FontSize="{wpf:FontSize 13}" Margin="0,0,0,8"/>
+                                <ItemsControl ItemsSource="{Binding HotkeySection.Contenders}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type local:ContenderAppViewModel}">
+                                            <Border Background="{Binding DataContext.BadgeBackgroundBrush, RelativeSource={RelativeSource AncestorType=Window}}" 
+                                                    BorderBrush="{Binding DataContext.CardBorderBrush, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="4" 
+                                                    Padding="8,5" 
+                                                    Margin="0,0,0,4">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="180"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Column="0" Text="{Binding Name}" FontWeight="SemiBold" FontSize="{wpf:FontSize 11.5}" VerticalAlignment="Center"/>
+                                                    <TextBlock Grid.Column="1" Text="{Binding Description}" FontSize="{wpf:FontSize 11}" Foreground="{Binding DataContext.TextSecondaryBrush, RelativeSource={RelativeSource AncestorType=Window}}" VerticalAlignment="Center"/>
+                                                    <TextBlock Grid.Column="2" Text="{Binding StatusText}" Foreground="{Binding StatusBrush}" FontWeight="SemiBold" FontSize="{wpf:FontSize 11}" VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Section 5: Installation Integrity & Checksum Verification -->
+                <ScrollViewer x:Name="ChecksumPanel" 
+                              VerticalScrollBarVisibility="Auto" 
+                              Padding="22,18">
+                    <StackPanel>
+                        <!-- Section Header -->
+                        <Grid Margin="0,0,0,16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="{wpf:Text SelfService.ChecksumTitle}" 
+                                           FontSize="{wpf:FontSize 18}" 
+                                           FontWeight="SemiBold" 
+                                           Foreground="{Binding TextPrimaryBrush}"/>
+                                <TextBlock Text="{wpf:Text SelfService.ChecksumSub}" 
+                                           FontSize="{wpf:FontSize 12}" 
+                                           Foreground="{Binding TextSecondaryBrush}" 
+                                           Margin="0,3,0,0"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button AutomationProperties.Name="{wpf:Text SelfService.ChecksumBtnValidate}" Style="{StaticResource SecondaryButtonStyle}" 
+                                        Margin="0,0,8,0" 
+                                        Click="OnRefreshChecksumsClicked">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="🔄 "/>
+                                        <TextBlock Text="{wpf:Text SelfService.ChecksumBtnValidate}"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button AutomationProperties.Name="{wpf:Text SelfService.ChecksumBtnCopyReport}" Style="{StaticResource PrimaryButtonStyle}" 
+                                        Click="OnCopyChecksumReportClicked">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="📋 "/>
+                                        <TextBlock Text="{wpf:Text SelfService.ChecksumBtnCopyReport}"/>
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- Scanning / Progress Indicator Card (visible when scanning) -->
+                        <Border Style="{StaticResource CardStyle}" 
+                                Visibility="{Binding ChecksumSection.IsScanning, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                Margin="0,0,0,12"
+                                Padding="12">
+                            <StackPanel>
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding ChecksumSection.ScanProgressText}" 
+                                               FontWeight="SemiBold" 
+                                               FontSize="{wpf:FontSize 12}" 
+                                               Foreground="{Binding TextPrimaryBrush}"/>
+                                    <TextBlock Grid.Column="1" 
+                                               Text="{Binding ChecksumSection.ScanProgressPercentage, StringFormat='{}{0}%'}" 
+                                               FontWeight="Bold" 
+                                               FontSize="{wpf:FontSize 12}" 
+                                               Foreground="{Binding AccentBrush}"/>
+                                </Grid>
+                                <ProgressBar Height="6" 
+                                             Value="{Binding ChecksumSection.ScanProgressPercentage, Mode=OneWay}" 
+                                             Maximum="100" 
+                                             Foreground="{Binding AccentBrush}" 
+                                             Background="{Binding BadgeBackgroundBrush}" 
+                                             BorderThickness="0"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Overall Status Banner Card -->
+                        <Border Style="{StaticResource CardStyle}" 
+                                BorderBrush="{Binding ChecksumSection.BannerBrush}" 
+                                Background="{Binding ChecksumSection.BannerBackgroundBrush}"
+                                BorderThickness="1.5">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="38"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <TextBlock Grid.Column="0" 
+                                           Text="{Binding ChecksumSection.BannerIcon}" 
+                                           FontSize="{wpf:FontSize 22}" 
+                                           VerticalAlignment="Top" 
+                                           HorizontalAlignment="Left"
+                                           Margin="0,2,0,0"/>
+
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding ChecksumSection.BannerTitle}" 
+                                               FontSize="{wpf:FontSize 14}" 
+                                               FontWeight="Bold" 
+                                               Foreground="{Binding ChecksumSection.BannerBrush}"/>
+                                    <TextBlock Text="{Binding ChecksumSection.BannerDescription}" 
+                                               FontSize="{wpf:FontSize 11.5}" 
+                                               TextWrapping="Wrap" 
+                                               Foreground="{Binding TextSecondaryBrush}" 
+                                               Margin="0,3,0,0"/>
+                                </StackPanel>
+
+                                <Button AutomationProperties.Name="checksum.SHA256" Grid.Column="2" 
+                                        Style="{StaticResource SecondaryButtonStyle}" 
+                                        VerticalAlignment="Center" 
+                                        Margin="12,0,0,0"
+                                        Click="OnOpenChecksumManifestClicked">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="📄 "/>
+                                        <TextBlock Text="checksum.SHA256"/>
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                        </Border>
+
+                        <!-- Summary Metrics Grid -->
+                        <Grid Margin="0,0,0,14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Total -->
+                            <Border Grid.Column="0" Style="{StaticResource CardStyle}" Margin="0,0,4,0" Padding="10">
+                                <StackPanel>
+                                    <TextBlock Text="{wpf:Text SelfService.ChecksumMetricTotal}" FontSize="{wpf:FontSize 9.5}" FontWeight="Bold" Foreground="{Binding TextSecondaryBrush}"/>
+                                    <TextBlock Text="{Binding ChecksumSection.TotalCount}" FontSize="{wpf:FontSize 18}" FontWeight="Bold" Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Valid (Matches) -->
+                            <Border Grid.Column="1" Style="{StaticResource CardStyle}" Margin="4,0,4,0" Padding="10">
+                                <StackPanel>
+                                    <TextBlock Text="{wpf:Text SelfService.ChecksumMetricValid}" FontSize="{wpf:FontSize 9.5}" FontWeight="Bold" Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.SuccessBrush}"/>
+                                    <TextBlock Text="{Binding ChecksumSection.MatchedCount}" FontSize="{wpf:FontSize 18}" FontWeight="Bold" Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.SuccessBrush}" Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Mismatched (Corrupt) -->
+                            <Border Grid.Column="2" Style="{StaticResource CardStyle}" Margin="4,0,4,0" Padding="10">
+                                <StackPanel>
+                                    <TextBlock Text="{wpf:Text SelfService.ChecksumMetricCorrupt}" FontSize="{wpf:FontSize 9.5}" FontWeight="Bold" Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.ErrorBrush}"/>
+                                    <TextBlock Text="{Binding ChecksumSection.MismatchedCount}" FontSize="{wpf:FontSize 18}" FontWeight="Bold" Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.ErrorBrush}" Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Missing -->
+                            <Border Grid.Column="3" Style="{StaticResource CardStyle}" Margin="4,0,4,0" Padding="10">
+                                <StackPanel>
+                                    <TextBlock Text="{wpf:Text SelfService.ChecksumMetricMissing}" FontSize="{wpf:FontSize 9.5}" FontWeight="Bold" Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.WarningBrush}"/>
+                                    <TextBlock Text="{Binding ChecksumSection.MissingCount}" FontSize="{wpf:FontSize 18}" FontWeight="Bold" Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.WarningBrush}" Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Unlisted -->
+                            <Border Grid.Column="4" Style="{StaticResource CardStyle}" Margin="4,0,0,0" Padding="10">
+                                <StackPanel>
+                                    <TextBlock Text="{wpf:Text SelfService.ChecksumMetricUnlisted}" FontSize="{wpf:FontSize 9.5}" FontWeight="Bold" Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.InfoBrush}"/>
+                                    <TextBlock Text="{Binding ChecksumSection.UnlistedCount}" FontSize="{wpf:FontSize 18}" FontWeight="Bold" Foreground="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=CurrentPalette.InfoBrush}" Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <!-- Search and Filter Bar -->
+                        <Border Style="{StaticResource CardStyle}" Padding="10" Margin="0,0,0,10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- Search Box -->
+                                <Border Grid.Column="0" 
+                                        Background="{Binding Source={x:Static wpf:ThemeManager.Instance}, Path=TextBoxBackgroundBrush}" 
+                                        BorderBrush="{Binding CardBorderBrush}" 
+                                        BorderThickness="1" 
+                                        CornerRadius="4" 
+                                        Padding="6,4" 
+                                        Margin="0,0,10,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="🔍 " FontSize="{wpf:FontSize 11}" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                        <TextBox Grid.Column="1" 
+                                                 AutomationProperties.Name="{wpf:Text SelfService.ChecksumSearchPlaceholder}"
+                                                 Text="{Binding ChecksumSection.SearchQuery, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Background="Transparent" 
+                                                 BorderThickness="0" 
+                                                 FontSize="{wpf:FontSize 12}" 
+                                                 Foreground="{Binding TextPrimaryBrush}" 
+                                                 CaretBrush="{Binding TextPrimaryBrush}" 
+                                                 VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+
+                                <!-- Filter Buttons -->
+                                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                    <Button Style="{StaticResource SecondaryButtonStyle}" 
+                                            Tag="All" 
+                                            Click="OnFilterChecksumsClicked" 
+                                            Margin="0,0,4,0">
+                                        <TextBlock Text="{wpf:Text SelfService.ChecksumFilterAll}"/>
+                                    </Button>
+                                    <Button Style="{StaticResource SecondaryButtonStyle}" 
+                                            Tag="Issues" 
+                                            Click="OnFilterChecksumsClicked" 
+                                            Margin="0,0,4,0">
+                                        <TextBlock Text="{wpf:Text SelfService.ChecksumFilterIssues}"/>
+                                    </Button>
+                                    <Button Style="{StaticResource SecondaryButtonStyle}" 
+                                            Tag="Mismatch" 
+                                            Click="OnFilterChecksumsClicked" 
+                                            Margin="0,0,4,0">
+                                        <TextBlock Text="{wpf:Text SelfService.ChecksumFilterMismatch}"/>
+                                    </Button>
+                                    <Button Style="{StaticResource SecondaryButtonStyle}" 
+                                            Tag="Missing" 
+                                            Click="OnFilterChecksumsClicked" 
+                                            Margin="0,0,4,0">
+                                        <TextBlock Text="{wpf:Text SelfService.ChecksumFilterMissing}"/>
+                                    </Button>
+                                    <Button Style="{StaticResource SecondaryButtonStyle}" 
+                                            Tag="Unlisted" 
+                                            Click="OnFilterChecksumsClicked" 
+                                            Margin="0,0,4,0">
+                                        <TextBlock Text="{wpf:Text SelfService.ChecksumFilterUnlisted}"/>
+                                    </Button>
+                                    <Button Style="{StaticResource SecondaryButtonStyle}" 
+                                            Tag="Match" 
+                                            Click="OnFilterChecksumsClicked">
+                                        <TextBlock Text="{wpf:Text SelfService.ChecksumFilterValid}"/>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- Table: ListView of Verified Files -->
+                        <Border Style="{StaticResource CardStyle}" Padding="0" Margin="0,0,0,10">
+                            <ListView ItemsSource="{Binding ChecksumSection.FilteredItems}" 
+                                      SelectedItem="{Binding ChecksumSection.SelectedItem, Mode=TwoWay}"
+                                      ItemContainerStyle="{StaticResource ChecksumListViewItem}"
+                                      Background="Transparent" 
+                                      BorderThickness="0" 
+                                      MaxHeight="260"
+                                      ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                      Foreground="{Binding TextPrimaryBrush}">
+                                <ListView.View>
+                                    <GridView ColumnHeaderContainerStyle="{StaticResource ThemeGridViewColumnHeader}">
+                                        <!-- Status Column -->
+                                        <GridViewColumn Header="{wpf:Text SelfService.ChecksumColStatus}" Width="120">
+                                            <GridViewColumn.CellTemplate>
+                                                <DataTemplate DataType="{x:Type local:ChecksumItemViewModel}">
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding StatusIcon}" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                                                        <TextBlock Text="{Binding StatusText}" 
+                                                                   FontWeight="SemiBold" 
+                                                                   FontSize="{wpf:FontSize 11.5}" 
+                                                                   Foreground="{Binding StatusBrush}" 
+                                                                   VerticalAlignment="Center"/>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </GridViewColumn.CellTemplate>
+                                        </GridViewColumn>
+
+                                        <!-- File Path Column -->
+                                        <GridViewColumn Header="{wpf:Text SelfService.ChecksumColFile}" Width="260">
+                                            <GridViewColumn.CellTemplate>
+                                                <DataTemplate DataType="{x:Type local:ChecksumItemViewModel}">
+                                                    <StackPanel VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" FontSize="{wpf:FontSize 11.5}" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding Directory}" FontSize="{wpf:FontSize 10}" Foreground="{Binding DataContext.TextSecondaryBrush, RelativeSource={RelativeSource AncestorType=Window}}" TextTrimming="CharacterEllipsis"/>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </GridViewColumn.CellTemplate>
+                                        </GridViewColumn>
+
+                                        <!-- Actual SHA-256 Column -->
+                                        <GridViewColumn Header="{wpf:Text SelfService.ChecksumColActualHash}" Width="230">
+                                            <GridViewColumn.CellTemplate>
+                                                <DataTemplate DataType="{x:Type local:ChecksumItemViewModel}">
+                                                    <TextBlock Text="{Binding ActualHash}" 
+                                                               FontFamily="Consolas, monospace" 
+                                                               FontSize="{wpf:FontSize 10.5}" 
+                                                               TextTrimming="CharacterEllipsis" 
+                                                               VerticalAlignment="Center"/>
+                                                </DataTemplate>
+                                            </GridViewColumn.CellTemplate>
+                                        </GridViewColumn>
+
+                                        <!-- Expected SHA-256 Column -->
+                                        <GridViewColumn Header="{wpf:Text SelfService.ChecksumColExpectedHash}" Width="230">
+                                            <GridViewColumn.CellTemplate>
+                                                <DataTemplate DataType="{x:Type local:ChecksumItemViewModel}">
+                                                    <TextBlock Text="{Binding ExpectedHash}" 
+                                                               FontFamily="Consolas, monospace" 
+                                                               FontSize="{wpf:FontSize 10.5}" 
+                                                               TextTrimming="CharacterEllipsis" 
+                                                               VerticalAlignment="Center"/>
+                                                </DataTemplate>
+                                            </GridViewColumn.CellTemplate>
+                                        </GridViewColumn>
+
+                                        <!-- File Size Column -->
+                                        <GridViewColumn Header="{wpf:Text SelfService.ChecksumColSize}" Width="75">
+                                            <GridViewColumn.CellTemplate>
+                                                <DataTemplate DataType="{x:Type local:ChecksumItemViewModel}">
+                                                    <TextBlock Text="{Binding FileSizeText}" 
+                                                               FontFamily="Consolas, monospace" 
+                                                               FontSize="{wpf:FontSize 10.5}" 
+                                                               HorizontalAlignment="Right" 
+                                                               VerticalAlignment="Center"/>
+                                                </DataTemplate>
+                                            </GridViewColumn.CellTemplate>
+                                        </GridViewColumn>
+                                    </GridView>
+                                </ListView.View>
+                            </ListView>
+                        </Border>
+
+                        <!-- Selected Item Comparison Detail Inspector Card -->
+                        <Border Style="{StaticResource CardStyle}" 
+                                Visibility="{Binding ChecksumSection.HasSelectedItem, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                Padding="14">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <!-- Header: File Name & Status Badge -->
+                                <Grid Grid.Row="0" Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding ChecksumSection.SelectedItem.StatusIcon}" FontSize="{wpf:FontSize 15}" Margin="0,0,6,0"/>
+                                        <TextBlock Text="{Binding ChecksumSection.SelectedItem.RelativePath}" FontWeight="Bold" FontSize="{wpf:FontSize 13}" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                    <Button AutomationProperties.Name="{wpf:Text SelfService.ChecksumBtnCopySelected}" Grid.Column="1" 
+                                            Style="{StaticResource SecondaryButtonStyle}" 
+                                            Click="OnCopySelectedChecksumDetailsClicked">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="📋 "/>
+                                            <TextBlock Text="{wpf:Text SelfService.ChecksumBtnCopySelected}"/>
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+
+                                <!-- Status Hint / Corruption Warning -->
+                                <Border Grid.Row="1" 
+                                        Background="{Binding BadgeBackgroundBrush}" 
+                                        BorderBrush="{Binding ChecksumSection.SelectedItem.StatusBrush}" 
+                                        BorderThickness="1" 
+                                        CornerRadius="4" 
+                                        Padding="10,6" 
+                                        Margin="0,0,0,10">
+                                    <TextBlock Text="{Binding ChecksumSection.SelectedItem.StatusHint}" 
+                                               FontSize="{wpf:FontSize 11.5}" 
+                                               Foreground="{Binding TextPrimaryBrush}" 
+                                               TextWrapping="Wrap"/>
+                                </Border>
+
+                                <!-- Side-by-Side Comparison of Hashes -->
+                                <Grid Grid.Row="2" Margin="0,0,0,4">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="130"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <!-- Expected -->
+                                    <TextBlock Grid.Row="0" Grid.Column="0" 
+                                               Text="{wpf:Text SelfService.ChecksumDetailExpected}" 
+                                               FontWeight="SemiBold" 
+                                               FontSize="{wpf:FontSize 11}" 
+                                               Foreground="{Binding TextSecondaryBrush}" 
+                                               VerticalAlignment="Center"/>
+                                    <TextBox Grid.Row="0" Grid.Column="1" Margin="0,0,0,4"
+                                             Text="{Binding ChecksumSection.SelectedItem.ExpectedHash, Mode=OneWay}" 
+                                             AutomationProperties.Name="{wpf:Text SelfService.ChecksumDetailExpected}"
+                                             IsReadOnly="True" 
+                                             FontFamily="Consolas, monospace" 
+                                             FontSize="{wpf:FontSize 11}" 
+                                             Foreground="{Binding TextPrimaryBrush}"/>
+
+                                    <!-- Actual -->
+                                    <TextBlock Grid.Row="1" Grid.Column="0" 
+                                               Text="{wpf:Text SelfService.ChecksumDetailActual}" 
+                                               FontWeight="SemiBold" 
+                                               FontSize="{wpf:FontSize 11}" 
+                                               Foreground="{Binding TextSecondaryBrush}" 
+                                               VerticalAlignment="Center"/>
+                                    <TextBox Grid.Row="1" Grid.Column="1" Margin="0,0,0,4"
+                                             Text="{Binding ChecksumSection.SelectedItem.ActualHash, Mode=OneWay}" 
+                                             AutomationProperties.Name="{wpf:Text SelfService.ChecksumDetailActual}"
+                                             IsReadOnly="True" 
+                                             FontFamily="Consolas, monospace" 
+                                             FontSize="{wpf:FontSize 11}" 
+                                             Foreground="{Binding ChecksumSection.SelectedItem.StatusBrush}"/>
+
+                                    <!-- Full Path -->
+                                    <TextBlock Grid.Row="2" Grid.Column="0" 
+                                               Text="{wpf:Text SelfService.ChecksumDetailPath}" 
+                                               FontWeight="SemiBold" 
+                                               FontSize="{wpf:FontSize 11}" 
+                                               Foreground="{Binding TextSecondaryBrush}" 
+                                               VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="1" 
+                                               Text="{Binding ChecksumSection.SelectedItem.FullPath}" 
+                                               FontFamily="Consolas, monospace" 
+                                               FontSize="{wpf:FontSize 10.5}" 
+                                               Foreground="{Binding TextSecondaryBrush}" 
+                                               TextWrapping="Wrap" 
+                                               VerticalAlignment="Center" 
+                                               Margin="6,2,0,0"/>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Imgur uploads, only when there are some: the same view as in the welcome wizard -->
+                <views:ImgurUploadsView x:Name="ImgurPanel"
+                                        DataContext="{Binding ImgurSection}"
+                                        Visibility="Collapsed"
+                                        Margin="22,18"/>
+
+                <!-- Windows policies, the full Greenshot only: the view is set in the code (Greenshot Light doesn't have it) -->
+                <ContentControl x:Name="PoliciesPanel"
+                                Visibility="Collapsed"
+                                Margin="22,18"/>
+
+                <!-- Section 6 (DEBUG only): Browser Extension & IPC Integration Debugger -->
+                <ScrollViewer x:Name="IntegrationDebugPanel" 
+                              VerticalScrollBarVisibility="Auto" 
+                              Visibility="Collapsed"
+                              Padding="22,18">
+                    <StackPanel>
+                        <!-- Section Header -->
+                        <Grid Margin="0,0,0,16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="{wpf:Text SelfService.DebugHeader}" 
+                                           FontSize="{wpf:FontSize 18}" 
+                                           FontWeight="SemiBold" 
+                                           Foreground="{Binding TextPrimaryBrush}"/>
+                                <TextBlock Text="{wpf:Text SelfService.DebugHeaderSub}" 
+                                           FontSize="{wpf:FontSize 12}" 
+                                           Foreground="{Binding TextSecondaryBrush}" 
+                                           Margin="0,3,0,0"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button AutomationProperties.Name="{wpf:Text SelfService.DebugExtensionFolder}" Style="{StaticResource SecondaryButtonStyle}" 
+                                        Margin="0,0,8,0" 
+                                        Click="OnOpenDebugExtensionFolderClicked">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="📁 "/>
+                                        <TextBlock Text="{wpf:Text SelfService.DebugExtensionFolder}"/>
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- Feedback Banner (when an action is performed) -->
+                        <Border Style="{StaticResource CardStyle}"
+                                BorderThickness="1.5"
+                                BorderBrush="{Binding IntegrationDebugSection.ActionFeedbackBrush}"
+                                Margin="0,0,0,12"
+                                Padding="12"
+                                Visibility="{Binding IntegrationDebugSection.HasActionFeedback, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="{Binding IntegrationDebugSection.ActionFeedback}"
+                                       Foreground="{Binding IntegrationDebugSection.ActionFeedbackBrush}"
+                                       FontWeight="SemiBold"
+                                       FontSize="{wpf:FontSize 12}"/>
+                        </Border>
+
+                        <!-- Host & Proxy Status Overview Card -->
+                        <Border Style="{StaticResource CardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{wpf:Text SelfService.DebugStatusTitle}" 
+                                           FontSize="{wpf:FontSize 13}" 
+                                           FontWeight="SemiBold" 
+                                           Foreground="{Binding TextPrimaryBrush}" 
+                                           Margin="0,0,0,10"/>
+                                
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="180"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{wpf:Text SelfService.DebugProxy}" FontWeight="SemiBold" Foreground="{Binding TextSecondaryBrush}"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding IntegrationDebugSection.ProxyStatus}" Foreground="{Binding TextPrimaryBrush}" TextWrapping="Wrap"/>
+                                </Grid>
+
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="180"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{wpf:Text SelfService.DebugChrome}" FontWeight="SemiBold" Foreground="{Binding TextSecondaryBrush}"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding IntegrationDebugSection.ChromeStatus}" Foreground="{Binding TextPrimaryBrush}" TextWrapping="Wrap"/>
+                                </Grid>
+
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="180"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{wpf:Text SelfService.DebugEdge}" FontWeight="SemiBold" Foreground="{Binding TextSecondaryBrush}"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding IntegrationDebugSection.EdgeStatus}" Foreground="{Binding TextPrimaryBrush}" TextWrapping="Wrap"/>
+                                </Grid>
+
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="180"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{wpf:Text SelfService.DebugFirefox}" FontWeight="SemiBold" Foreground="{Binding TextSecondaryBrush}"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding IntegrationDebugSection.FirefoxStatus}" Foreground="{Binding TextPrimaryBrush}" TextWrapping="Wrap"/>
+                                </Grid>
+
+                                <Grid Margin="0,0,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="180"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{wpf:Text SelfService.DebugUrlProtocol}" FontWeight="SemiBold" Foreground="{Binding TextSecondaryBrush}"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding IntegrationDebugSection.UrlSchemeStatus}" Foreground="{Binding TextPrimaryBrush}" TextWrapping="Wrap"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Extension ID Configuration Card -->
+                        <Border Style="{StaticResource CardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{wpf:Text SelfService.DebugExtensionIdTitle}" 
+                                           FontSize="{wpf:FontSize 13}" 
+                                           FontWeight="SemiBold" 
+                                           Foreground="{Binding TextPrimaryBrush}" 
+                                           Margin="0,0,0,6"/>
+                                <TextBlock Text="{wpf:Text SelfService.DebugExtensionIdDesc}" 
+                                           FontSize="{wpf:FontSize 11.5}" 
+                                           Foreground="{Binding TextSecondaryBrush}" 
+                                           TextWrapping="Wrap" 
+                                           Margin="0,0,0,10"/>
+                                
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <!-- The shared text box style: border, background and the height of the dropdowns -->
+                                    <TextBox Grid.Column="0" Margin="0,0,10,0"
+                                             Text="{Binding IntegrationDebugSection.ExtensionId, UpdateSourceTrigger=PropertyChanged}" 
+                                             AutomationProperties.Name="{wpf:Text SelfService.DebugExtensionId}"
+                                             FontFamily="Consolas, monospace"/>
+                                    <Button Grid.Column="1" 
+                                            Style="{StaticResource SecondaryButtonStyle}" 
+                                            Click="OnSaveDebugExtensionIdClicked">
+                                        <TextBlock Text="{wpf:Text SelfService.DebugSaveId}"/>
+                                    </Button>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Actions Card -->
+                        <Border Style="{StaticResource CardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{wpf:Text SelfService.DebugActions}" 
+                                           FontSize="{wpf:FontSize 13}" 
+                                           FontWeight="SemiBold" 
+                                           Foreground="{Binding TextPrimaryBrush}" 
+                                           Margin="0,0,0,10"/>
+                                
+                                <WrapPanel Margin="0,0,0,10">
+                                    <Button AutomationProperties.Name="{wpf:Text SelfService.DebugRegister}" Style="{StaticResource PrimaryButtonStyle}" 
+                                            Margin="0,0,10,6" 
+                                            Click="OnRegisterDebugHkcuClicked">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="➕ "/>
+                                            <TextBlock Text="{wpf:Text SelfService.DebugRegister}"/>
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button AutomationProperties.Name="{wpf:Text SelfService.DebugUnregister}" Style="{StaticResource SecondaryButtonStyle}" 
+                                            Margin="0,0,10,6" 
+                                            Click="OnUnregisterDebugHkcuClicked">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="🗑️ "/>
+                                            <TextBlock Text="{wpf:Text SelfService.DebugUnregister}"/>
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button AutomationProperties.Name="{wpf:Text SelfService.DebugTestUrl}" Style="{StaticResource SecondaryButtonStyle}" 
+                                            Margin="0,0,0,6" 
+                                            Click="OnTestDebugUrlSchemeClicked">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="🚀 "/>
+                                            <TextBlock Text="{wpf:Text SelfService.DebugTestUrl}"/>
+                                        </StackPanel>
+                                    </Button>
+                                </WrapPanel>
+
+                                <TextBlock Text="{wpf:Text SelfService.DebugNote}" 
+                                           FontSize="{wpf:FontSize 11}" 
+                                           Foreground="{Binding TextSecondaryBrush}" 
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+        </Grid>
+
+        <!-- Footer Status Bar (no redundant Close button) -->
+        <Border Grid.Row="2"
+                Background="{Binding CardBackgroundBrush}"
+                BorderBrush="{Binding CardBorderBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="16,0">
+            <Grid VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Status message -->
+                <TextBlock Grid.Column="0" 
+                           x:Name="FooterStatusText" 
+                           wpf:LiveRegion.Mode="Polite"
+                           FontSize="{wpf:FontSize 11.5}" 
+                           Foreground="{Binding TextSecondaryBrush}" 
+                           VerticalAlignment="Center"/>
+
+                <!-- Shortcut indicator -->
+                <TextBlock Grid.Column="1" 
+                           Text="{wpf:Text SelfService.ShortcutsHint}" 
+                           FontSize="{wpf:FontSize 11}" 
+                           Foreground="{Binding TextSecondaryBrush}" 
+                           VerticalAlignment="Center"/>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

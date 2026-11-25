@@ -1,12 +1,12 @@
-﻿// Greenshot - a free and open source screenshot tool
-// Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+// Greenshot - a free and open source screenshot tool
+// Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
 // 
 // For more information see: https://getgreenshot.org/
 // The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 1 of the License, or
+// the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 // 
 // This program is distributed in the hope that it will be useful,
@@ -21,14 +21,14 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security;
 using System.Xml;
-using Greenshot.Base.Core;
-using Greenshot.Base.Core.Enums;
 using Greenshot.Base.Interfaces;
-using Greenshot.Base.Interfaces.Plugin;
-using Greenshot.Plugin.Office.Com;
+using Greenshot.Base.Native;
+using Dapplo.Windows.Com;
 using Greenshot.Plugin.Office.OfficeExport.Entities;
-using Microsoft.Office.Interop.OneNote;
+using Greenshot.Plugin.Office.OfficeInterop;
+using System.Drawing;
 
 namespace Greenshot.Plugin.Office.OfficeExport
 {
@@ -41,7 +41,7 @@ namespace Greenshot.Plugin.Office.OfficeExport
         private const string XmlImageContent = "<one:Image format=\"png\"><one:Size width=\"{1}.0\" height=\"{2}.0\" isSetByUser=\"true\" /><one:Data>{0}</one:Data></one:Image>";
 
         private const string XmlOutline =
-            "<?xml version=\"1.0\"?><one:Page xmlns:one=\"{2}\" ID=\"{1}\"><one:Title><one:OE><one:T><![CDATA[{3}]]></one:T></one:OE></one:Title>{0}</one:Page>";
+            "<?xml version=\"1.0\"?><one:Page xmlns:one=\"{2}\" ID=\"{1}\"><one:Title><one:OE><one:T>{3}</one:T></one:OE></one:Title>{0}</one:Page>";
 
         private const string OnenoteNamespace2010 = "http://schemas.microsoft.com/office/onenote/2010/onenote";
         private static readonly log4net.ILog LOG = log4net.LogManager.GetLogger(typeof(OneNoteExporter));
@@ -49,15 +49,24 @@ namespace Greenshot.Plugin.Office.OfficeExport
         /// <summary>
         ///     Create a new page in the "unfiled notes section", with the title of the capture, and export the capture there.
         /// </summary>
-        /// <param name="surfaceToUpload">ISurface</param>
+        /// <param name="png">The capture encoded as PNG</param>
+        /// <param name="imageSize">Size of the capture</param>
+        /// <param name="title">Title of the new page</param>
         /// <returns>bool true if export worked</returns>
-        public bool ExportToNewPage(ISurface surfaceToUpload)
+        public bool ExportToNewPage(EncodedImage png, Size imageSize, string title)
         {
             using var oneNoteApplication = GetOrCreateOneNoteApplication();
+            if (oneNoteApplication == null)
+            {
+                LOG.Error("Failed to get or create OneNote application instance");
+                return false;
+            }
+
             var newPage = new OneNotePage();
             string unfiledNotesSectionId = GetSectionId(oneNoteApplication, SpecialLocation.slUnfiledNotesSection);
             if (unfiledNotesSectionId == null)
             {
+                LOG.Error("Failed to get unfiled notes section ID");
                 return false;
             }
 
@@ -65,43 +74,51 @@ namespace Greenshot.Plugin.Office.OfficeExport
             oneNoteApplication.ComObject.CreateNewPage(unfiledNotesSectionId, out pageId, NewPageStyle.npsDefault);
             newPage.Id = pageId;
             // Set the new name, this is automatically done in the export to page
-            newPage.Name = surfaceToUpload.CaptureDetails.Title;
-            return ExportToPage(oneNoteApplication, surfaceToUpload, newPage);
+            newPage.Name = title;
+            return ExportToPage(oneNoteApplication, png, imageSize, newPage);
         }
 
         /// <summary>
         ///     Export the capture to the specified page
         /// </summary>
-        /// <param name="surfaceToUpload">ISurface</param>
+        /// <param name="png">The capture encoded as PNG</param>
+        /// <param name="imageSize">Size of the capture</param>
         /// <param name="page">OneNotePage</param>
         /// <returns>bool true if everything worked</returns>
-        public bool ExportToPage(ISurface surfaceToUpload, OneNotePage page)
+        public bool ExportToPage(EncodedImage png, Size imageSize, OneNotePage page)
         {
             using var oneNoteApplication = GetOrCreateOneNoteApplication();
-            return ExportToPage(oneNoteApplication, surfaceToUpload, page);
+            if (oneNoteApplication == null)
+            {
+                LOG.Error("Failed to get or create OneNote application instance");
+                return false;
+            }
+
+            return ExportToPage(oneNoteApplication, png, imageSize, page);
         }
 
         /// <summary>
         ///     Export the capture to the specified page
         /// </summary>
         /// <param name="oneNoteApplication">IOneNoteApplication</param>
-        /// <param name="surfaceToUpload">ISurface</param>
+        /// <param name="png">The capture encoded as PNG</param>
+        /// <param name="imageSize">Size of the capture</param>
         /// <param name="page">OneNotePage</param>
         /// <returns>bool true if everything worked</returns>
-        private bool ExportToPage(IDisposableCom<Application> oneNoteApplication, ISurface surfaceToUpload, OneNotePage page)
+        private bool ExportToPage(IDisposableCom<IOneNoteApplication> oneNoteApplication, EncodedImage png, Size imageSize, OneNotePage page)
         {
             if (oneNoteApplication == null)
             {
+                LOG.Error("OneNote application instance is null");
                 return false;
             }
 
-            using var pngStream = new MemoryStream();
-            var pngOutputSettings = new SurfaceOutputSettings(OutputFormat.png, 100, false);
-            ImageIO.SaveToStream(surfaceToUpload, pngStream, pngOutputSettings);
-            var base64String = Convert.ToBase64String(pngStream.GetBuffer());
-            var imageXmlStr = string.Format(XmlImageContent, base64String, surfaceToUpload.Image.Width, surfaceToUpload.Image.Height);
-            var pageChangesXml = string.Format(XmlOutline, imageXmlStr, page.Id, OnenoteNamespace2010, page.Name);
-            LOG.InfoFormat("Sending XML: {0}", pageChangesXml);
+            var base64String = System.Runtime.InteropServices.MemoryMarshal.TryGetArray(png.Bytes, out var buffer) && buffer.Array != null
+                ? Convert.ToBase64String(buffer.Array, buffer.Offset, buffer.Count)
+                : Convert.ToBase64String(png.ToArray());
+            var imageXmlStr = string.Format(XmlImageContent, base64String, imageSize.Width, imageSize.Height);
+            var pageChangesXml = string.Format(XmlOutline, imageXmlStr, page.Id, OnenoteNamespace2010, SecurityElement.Escape(page.Name));
+            LOG.DebugFormat("Updating OneNote page {0}", page.Id);
             oneNoteApplication.ComObject.UpdatePageContent(pageChangesXml, DateTime.MinValue, XMLSchema.xs2010, false);
             try
             {
@@ -116,42 +133,20 @@ namespace Greenshot.Plugin.Office.OfficeExport
         }
 
         /// <summary>
-        ///     Call this to get the running Excel application, returns null if there isn't any.
+        ///     Is OneNote running? OneNote doesn't register in the Running Object Table, so GetActiveObject never finds it.
+        ///     Creating OneNote.Application connects to the running OneNote instead of starting a second one.
+        ///     This runs on every destination picker open, so it doesn't use Process.GetProcessesByName, which builds Process info for every process.
         /// </summary>
-        /// <returns>ComDisposable for Excel.Application or null</returns>
-        private IDisposableCom<Application> GetOneNoteApplication()
-        {
-            IDisposableCom<Application> oneNoteApplication;
-            try
-            {
-                oneNoteApplication = OleAut32Api.GetActiveObject<Application>("OneNote.Application");
-            }
-            catch
-            {
-                // Ignore, probably no OneNote running
-                return null;
-            }
-
-            return oneNoteApplication;
-        }
+        private static bool IsOneNoteRunning() => ProcessHelper.IsRunning("ONENOTE.EXE");
 
         /// <summary>
-        ///     Call this to get the running OneNote application, or create a new instance
+        ///     The running OneNote, or a new instance (see IsOneNoteRunning why this doesn't use GetActiveObject)
         /// </summary>
-        /// <returns>ComDisposable for OneNote.Application</returns>
-        private IDisposableCom<Application> GetOrCreateOneNoteApplication()
-        {
-            var oneNoteApplication = GetOneNoteApplication();
-            if (oneNoteApplication == null)
-            {
-                oneNoteApplication = DisposableCom.Create(new Application());
-            }
-
-            return oneNoteApplication;
-        }
+        private IDisposableCom<IOneNoteApplication> GetOrCreateOneNoteApplication() =>
+            DisposableCom.Create((IOneNoteApplication) Activator.CreateInstance(Type.GetTypeFromProgID("OneNote.Application", true)));
 
         /// <summary>
-        ///     Get the captions of all the open word documents
+        ///     Get the pages of a running OneNote, opening the destination menu doesn't start OneNote
         /// </summary>
         /// <returns></returns>
         public IList<OneNotePage> GetPages()
@@ -159,6 +154,11 @@ namespace Greenshot.Plugin.Office.OfficeExport
             var pages = new List<OneNotePage>();
             try
             {
+                if (!IsOneNoteRunning())
+                {
+                    return pages;
+                }
+
                 using var oneNoteApplication = GetOrCreateOneNoteApplication();
                 if (oneNoteApplication != null)
                 {
@@ -219,7 +219,7 @@ namespace Greenshot.Plugin.Office.OfficeExport
                                         Name = xmlReader.GetAttribute("name"),
                                         Id = xmlReader.GetAttribute("ID")
                                     };
-                                    if ((page.Id == null) || (page.Name == null))
+                                    if ((page.Id == null) || (page.Name == null) || (page.Parent == null) || (page.Parent.Parent == null))
                                     {
                                         continue;
                                     }
@@ -272,53 +272,17 @@ namespace Greenshot.Plugin.Office.OfficeExport
         /// <param name="oneNoteApplication"></param>
         /// <param name="specialLocation">SpecialLocation</param>
         /// <returns>string with section ID</returns>
-        private string GetSectionId(IDisposableCom<Application> oneNoteApplication, SpecialLocation specialLocation)
+        private string GetSectionId(IDisposableCom<IOneNoteApplication> oneNoteApplication, SpecialLocation specialLocation)
         {
             if (oneNoteApplication == null)
             {
                 return null;
             }
 
-            // ReSharper disable once RedundantAssignment
-            string unfiledNotesPath = "";
-            oneNoteApplication.ComObject.GetSpecialLocation(specialLocation, out unfiledNotesPath);
-
-            // ReSharper disable once RedundantAssignment
-            string notebookXml = "";
-            oneNoteApplication.ComObject.GetHierarchy("", HierarchyScope.hsPages, out notebookXml, XMLSchema.xs2010);
-            if (!string.IsNullOrEmpty(notebookXml))
-            {
-                LOG.Debug(notebookXml);
-                StringReader reader = null;
-                try
-                {
-                    reader = new StringReader(notebookXml);
-                    using var xmlReader = new XmlTextReader(reader);
-                    while (xmlReader.Read())
-                    {
-                        if (!"one:Section".Equals(xmlReader.Name))
-                        {
-                            continue;
-                        }
-
-                        string id = xmlReader.GetAttribute("ID");
-                        string path = xmlReader.GetAttribute("path");
-                        if (unfiledNotesPath.Equals(path))
-                        {
-                            return id;
-                        }
-                    }
-                }
-                finally
-                {
-                    if (reader != null)
-                    {
-                        reader.Dispose();
-                    }
-                }
-            }
-
-            return null;
+            oneNoteApplication.ComObject.GetSpecialLocation(specialLocation, out string sectionPath);
+            // Opening the section gives its ID, also when it's in no open notebook (where the hierarchy doesn't list it)
+            oneNoteApplication.ComObject.OpenHierarchy(sectionPath, string.Empty, out string sectionId, CreateFileType.cftNone);
+            return sectionId;
         }
     }
 }

@@ -1,13 +1,13 @@
-﻿/*
+/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -25,6 +25,7 @@ using System.IO;
 using Dapplo.Windows.Common.Structs;
 using Greenshot.Base.Core;
 using Greenshot.Base.Interfaces;
+using Greenshot.Base.Interfaces.Drawing;
 using Svg;
 
 namespace Greenshot.Editor.Drawing
@@ -33,7 +34,7 @@ namespace Greenshot.Editor.Drawing
     /// This provides a resizable SVG container, redrawing the SVG in the size the container takes.
     /// </summary>
     [Serializable]
-    public class SvgContainer : VectorGraphicsContainer
+    public class SvgContainer : VectorGraphicsContainer, IHaveScaleOptions
     {
         private MemoryStream _svgContent;
 
@@ -47,6 +48,11 @@ namespace Greenshot.Editor.Drawing
             Init();
             Size = new Size((int)_svgDocument.Width, (int)_svgDocument.Height);
         }
+
+        /// <summary>
+        /// The SVG file contents
+        /// </summary>
+        public byte[] SvgContent => _svgContent?.ToArray();
 
         protected override void Init()
         {
@@ -77,5 +83,10 @@ namespace Greenshot.Editor.Drawing
         public override bool HasDefaultSize => true;
 
         public override NativeSize DefaultSize => new NativeSize((int)_svgDocument.Width, (int)_svgDocument.Height);
+
+        public ScaleOptions GetScaleOptions()
+        {
+            return ScaleOptions.Rational;
+        }
     }
 }

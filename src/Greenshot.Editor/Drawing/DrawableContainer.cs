@@ -1,13 +1,13 @@
 /*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  *
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
@@ -29,7 +29,7 @@ using System.Runtime.Serialization;
 using System.Windows.Forms;
 using Dapplo.Windows.Common.Extensions;
 using Dapplo.Windows.Common.Structs;
-using Greenshot.Base.IniFile;
+using Greenshot.Base.Core;
 using Greenshot.Base.Interfaces;
 using Greenshot.Base.Interfaces.Drawing;
 using Greenshot.Base.Interfaces.Drawing.Adorners;
@@ -53,7 +53,17 @@ namespace Greenshot.Editor.Drawing
     public abstract class DrawableContainer : AbstractFieldHolderWithChildren, IDrawableContainer
     {
         private static readonly ILog LOG = LogManager.GetLogger(typeof(DrawableContainer));
-        protected static readonly EditorConfiguration EditorConfig = IniConfig.GetIniSection<EditorConfiguration>();
+        protected static readonly IEditorConfiguration EditorConfig = IniConfigHelper.EnsureSection<IEditorConfiguration>(() => new EditorConfigurationImpl());
+        
+        [NonSerialized]
+        private object _tag;
+
+        public object Tag
+        {
+            get => _tag;
+            set => _tag = value;
+        }
+
         private const int M11 = 0;
         private const int M22 = 3;
 
@@ -314,19 +324,13 @@ namespace Greenshot.Editor.Drawing
         {
             get
             {
-                foreach (IFilter filter in Filters)
+                if (HasInvertedFilter && _parent?.Image != null)
                 {
-                    if (filter.Invert)
-                    {
-                        return new NativeRect(Point.Empty, _parent.Image.Size);
-                    }
+                    return new NativeRect(Point.Empty, _parent.Image.Size);
                 }
 
-                // Take a base safety margin
+                // Take a base safety margin, the adorners are drawn in screen pixels: the surface adds their size when invalidating
                 int lineThickness = 5;
-
-                // add adorner size
-                lineThickness += Adorners.Max(adorner => Math.Max(adorner.Bounds.Width, adorner.Bounds.Height));
 
                 if (HasField(FieldType.LINE_THICKNESS))
                 {
@@ -359,8 +363,13 @@ namespace Greenshot.Editor.Drawing
             return true;
         }
 
+        /// <summary>
+        /// A double click (or Enter) on the selected element: shows its properties in the Selection panel and moves the keyboard
+        /// there. An element with an action of its own overrides it, e.g. the text is edited.
+        /// </summary>
         public virtual void OnDoubleClick()
         {
+            InternalParent?.RequestProperties();
         }
 
         /// <summary>
@@ -394,11 +403,73 @@ namespace Greenshot.Editor.Drawing
             Adorners.Add(new ResizeAdorner(this, Positions.MiddleRight));
         }
 
-        public bool HasFilters => Filters.Count > 0;
+        /// <summary>
+        /// True if one of the children is a filter, without creating the list of filters (called for every element on every paint)
+        /// </summary>
+        public bool HasFilters
+        {
+            get
+            {
+                foreach (IFieldHolder child in Children)
+                {
+                    if (child is IFilter)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// True if one of the filters is inverted, it covers the image outside the element
+        /// </summary>
+        public bool HasInvertedFilter
+        {
+            get
+            {
+                foreach (IFieldHolder child in Children)
+                {
+                    if (child is IFilter { Invert: true })
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
 
         public abstract void Draw(Graphics graphics, RenderMode renderMode);
 
-        public virtual void DrawContent(Graphics graphics, Bitmap bmp, RenderMode renderMode, NativeRect clipRectangle)
+        /// <summary>
+		/// A loop method (for now loop method) which calls the specified action, to draw a shadow
+		/// </summary>
+		/// <param name="lineThickness">int</param>
+		/// <param name="drawShadowStepAction">Action which acceps the alpha value, current step and a brush</param>
+		protected static void DrawShadow(int lineThickness, Action<int, int, Pen, Brush> drawShadowStepAction)
+        {
+            double alpha = 100;
+            double stepsCount = 5;
+            double alphaStep = alpha / stepsCount;
+            int currentStep = 0;
+            using (var brush = new SolidBrush(Color.Black))
+            using (var pen = new Pen(Color.Black, lineThickness))
+            {
+                while (alpha >= 1.0)
+                {
+                    var alphaInt = (int)Math.Round(alpha);
+                    pen.Color = Color.FromArgb(alphaInt, Color.Black);
+                    brush.Color = pen.Color;
+                    drawShadowStepAction(alphaInt, currentStep, pen, brush);
+                    alpha -= alphaStep;
+                    currentStep++;
+                }
+            }
+        }
+
+        public virtual void DrawContent(Graphics graphics, Bitmap bmp, RenderMode renderMode, NativeRect clipRectangle, bool skipInvertedFilters = false)
         {
             if (Children.Count > 0)
             {
@@ -414,7 +485,10 @@ namespace Greenshot.Editor.Drawing
                         {
                             if (filter.Invert)
                             {
-                                filter.Apply(graphics, bmp, Bounds, renderMode);
+                                if (!skipInvertedFilters)
+                                {
+                                    filter.Apply(graphics, bmp, Bounds, renderMode);
+                                }
                             }
                             else
                             {
@@ -500,7 +574,7 @@ namespace Greenshot.Editor.Drawing
             _parent?.MakeUndoable(new DrawableContainerBoundsChangeMemento(this), allowMerge);
         }
 
-        public void MoveBy(int dx, int dy)
+        public virtual void MoveBy(int dx, int dy)
         {
             Left += dx;
             Top += dy;
@@ -531,10 +605,10 @@ namespace Greenshot.Editor.Drawing
             Invalidate();
 
             // reset "workbench" rectangle to current bounds
-            _boundsAfterResize = new NativeRectFloat(_boundsBeforeResize.Left, _boundsBeforeResize.Top, x - _boundsAfterResize.Left, y - _boundsAfterResize.Top);
+            _boundsAfterResize = new NativeRectFloat(_boundsBeforeResize.Left, _boundsBeforeResize.Top, x - _boundsBeforeResize.Left, y - _boundsBeforeResize.Top);
 
             var scaleOptions = (this as IHaveScaleOptions)?.GetScaleOptions();
-            _boundsAfterResize = ScaleHelper.Scale(_boundsAfterResize, x, y, GetAngleRoundProcessor(), scaleOptions);
+            _boundsAfterResize = ScaleHelper.Scale(_boundsAfterResize.Round(), x, y, GetAngleRoundProcessor(), scaleOptions);
 
             // apply scaled bounds to this DrawableContainer
             ApplyBounds(_boundsAfterResize);
@@ -678,11 +752,51 @@ namespace Greenshot.Editor.Drawing
 
         public virtual NativeSize DefaultSize => throw new NotSupportedException("Object doesn't have a default size");
 
+        public virtual void ResetToDefaultSize()
+        {
+            if (!HasDefaultSize)
+            {
+                throw new NotSupportedException("Object doesn't have a default size");
+            }
+            Size = DefaultSize;
+        }
+
         /// <summary>
         /// Allows to override the initializing of the fields, so we can actually have our own defaults
         /// </summary>
         protected virtual void InitializeFields()
         {
+        }
+
+        /// <summary>
+        /// Snap the container to the edge of the surface.
+        /// </summary>
+        /// <param name="direction">Direction in which to move the container.</param>
+        /// <param name="surface">The surface the container belongs to.</param>
+        public void SnapToEdge(Direction direction, Size surfaceSize)
+        {
+            var bounds = Bounds;
+            int dx = 0;
+            int dy = 0;
+            switch (direction)
+            {
+                case Direction.LEFT:
+                    dx = -bounds.Left;
+                    break;
+                case Direction.RIGHT:
+                    dx = surfaceSize.Width - bounds.Right;
+                    break;
+                case Direction.TOP:
+                    dy = -bounds.Top;
+                    break;
+                case Direction.BOTTOM:
+                    dy = surfaceSize.Height - bounds.Bottom;
+                    break;
+            }
+            this.Invalidate();
+            // Offset the raw bounds so negative dimensions keep their direction.
+            this.ApplyBounds(new NativeRectFloat(Left + dx, Top + dy, Width, Height));
+            this.Invalidate();
         }
     }
 }

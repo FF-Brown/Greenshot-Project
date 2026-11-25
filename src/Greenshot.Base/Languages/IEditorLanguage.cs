@@ -1,0 +1,1241 @@
+/*
+ * Greenshot - a free and open source screenshot tool
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
+ *
+ * For more information see: https://getgreenshot.org/
+ * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+using System.ComponentModel;
+using Dapplo.Ini.Internationalization.Attributes;
+
+namespace Greenshot.Base.Languages
+{
+    /// <summary>
+    /// The texts of the [Editor] section of greenshot.{ietf}.ini, the English text is shown per property.
+    /// Generated from the language files, add a key to the en-US file and a property here.
+    /// </summary>
+    [IniLanguageSection("Editor")]
+    public interface IEditorLanguage : INotifyPropertyChanged
+    {
+        /// <summary>
+        /// Bottom
+        /// </summary>
+        string AlignBottom { get; }
+
+        /// <summary>
+        /// Center
+        /// </summary>
+        string AlignCenter { get; }
+
+        /// <summary>
+        /// Horizontal alignment
+        /// </summary>
+        string AlignHorizontal { get; }
+
+        /// <summary>
+        /// Left
+        /// </summary>
+        string AlignLeft { get; }
+
+        /// <summary>
+        /// Middle
+        /// </summary>
+        string AlignMiddle { get; }
+
+        /// <summary>
+        /// Right
+        /// </summary>
+        string AlignRight { get; }
+
+        /// <summary>
+        /// Top
+        /// </summary>
+        string AlignTop { get; }
+
+        /// <summary>
+        /// Vertical alignment
+        /// </summary>
+        string AlignVertical { get; }
+
+        /// <summary>
+        /// Arrange
+        /// </summary>
+        string Arrange { get; }
+
+        /// <summary>
+        /// Arrow heads
+        /// </summary>
+        string Arrowheads { get; }
+
+        /// <summary>
+        /// Both
+        /// </summary>
+        string ArrowheadsBoth { get; }
+
+        /// <summary>
+        /// End point
+        /// </summary>
+        string ArrowheadsEnd { get; }
+
+        /// <summary>
+        /// None
+        /// </summary>
+        string ArrowheadsNone { get; }
+
+        /// <summary>
+        /// Start point
+        /// </summary>
+        string ArrowheadsStart { get; }
+
+        /// <summary>
+        /// Auto crop
+        /// </summary>
+        string Autocrop { get; }
+
+        /// <summary>
+        /// Auto crop not possible
+        /// </summary>
+        string AutocropNotPossible { get; }
+
+        /// <summary>
+        /// This capture has HDR content: Save as JPEG XR keeps its highlights, with what you drew on top
+        /// </summary>
+        string HdrBadgeTooltip { get; }
+
+        /// <summary>
+        /// This capture had HDR content, but its image was changed (e.g. by an effect): it is saved without HDR
+        /// </summary>
+        string HdrBadgeLostTooltip { get; }
+
+        /// <summary>
+        /// The text of this capture is recognized: ...
+        /// </summary>
+        string OcrBadgeFoundTooltip { get; }
+
+        /// <summary>
+        /// No text was recognized in this capture: ...
+        /// </summary>
+        string OcrBadgeNoTextTooltip { get; }
+
+        /// <summary>
+        /// Text recognition failed ({0}): ...
+        /// </summary>
+        string OcrBadgeFailedTooltip { get; }
+
+        /// <summary>
+        /// Fill color (0-9)
+        /// </summary>
+        string Backcolor { get; }
+
+        /// <summary>
+        /// Blur radius
+        /// </summary>
+        string BlurRadius { get; }
+
+        /// <summary>
+        /// Bold
+        /// </summary>
+        string Bold { get; }
+
+        /// <summary>
+        /// Border
+        /// </summary>
+        string Border { get; }
+
+        /// <summary>
+        /// Brightness
+        /// </summary>
+        string Brightness { get; }
+
+        /// <summary>
+        /// Error while accessing the clipboard. Please try again.
+        /// </summary>
+        string Clipboardfailed { get; }
+
+        /// <summary>
+        /// Close
+        /// </summary>
+        string Close { get; }
+
+        /// <summary>
+        /// Close all
+        /// </summary>
+        string CloseAll { get; }
+
+        /// <summary>
+        /// Do you want to save the screenshot?
+        /// </summary>
+        string CloseOnSave { get; }
+
+        /// <summary>
+        /// Save image?
+        /// </summary>
+        string CloseOnSaveTitle { get; }
+
+        /// <summary>
+        /// Close tab
+        /// </summary>
+        string CloseTab { get; }
+
+        /// <summary>
+        /// Choose an emoji
+        /// </summary>
+        string EmojiPicker { get; }
+
+        /// <summary>
+        /// Edit text
+        /// </summary>
+        string EditText { get; }
+
+        /// <summary>
+        /// History
+        /// </summary>
+        string EmojiHistory { get; }
+
+        /// <summary>
+        /// Panels
+        /// </summary>
+        string PanelArea { get; }
+
+        /// <summary>
+        /// Close the panel
+        /// </summary>
+        string PanelClose { get; }
+
+        /// <summary>
+        /// Properties
+        /// </summary>
+        string PanelProperties { get; }
+
+        /// <summary>
+        /// Selection
+        /// </summary>
+        string PanelSelection { get; }
+
+        /// <summary>
+        /// Select an element to see its properties
+        /// </summary>
+        string PanelSelectionEmpty { get; }
+
+        /// <summary>
+        /// Size and position
+        /// </summary>
+        string SectionSizeAndPosition { get; }
+
+        /// <summary>
+        /// Emoji
+        /// </summary>
+        string SectionEmoji { get; }
+
+        /// <summary>
+        /// Style and size
+        /// </summary>
+        string SectionStyleAndSize { get; }
+
+        /// <summary>
+        /// Effect
+        /// </summary>
+        string EffectsEffect { get; }
+
+        /// <summary>
+        /// Presets
+        /// </summary>
+        string EffectsPresets { get; }
+
+        /// <summary>
+        /// Preview
+        /// </summary>
+        string EffectsPreview { get; }
+
+        /// <summary>
+        /// Fit
+        /// </summary>
+        string EffectsPreviewFit { get; }
+
+        /// <summary>
+        /// Zoom with the mouse wheel or + and −, move with the mouse or the arrow keys. A double-click switches between fit and 1:1.
+        /// </summary>
+        string EffectsPreviewHint { get; }
+
+        /// <summary>
+        /// Apply
+        /// </summary>
+        string EffectsApply { get; }
+
+        /// <summary>
+        /// Width
+        /// </summary>
+        string EffectsBorderWidth { get; }
+
+        /// <summary>
+        /// Color
+        /// </summary>
+        string EffectsColor { get; }
+
+        /// <summary>
+        /// Resize
+        /// </summary>
+        string EffectsResize { get; }
+
+        /// <summary>
+        /// The new size is {0} × {1} pixels.
+        /// </summary>
+        string EffectsNewSize { get; }
+
+        /// <summary>
+        /// Width and height must be whole numbers from 1 to {0}.
+        /// </summary>
+        string EffectsResizeInvalid { get; }
+
+        /// <summary>
+        /// The capture has no transparent parts.
+        /// </summary>
+        string EffectsNoTransparency { get; }
+
+        /// <summary>
+        /// Default
+        /// </summary>
+        string EffectsPresetDefault { get; }
+
+        /// <summary>
+        /// Thin
+        /// </summary>
+        string EffectsPresetThin { get; }
+
+        /// <summary>
+        /// Wide
+        /// </summary>
+        string EffectsPresetWide { get; }
+
+        /// <summary>
+        /// White frame
+        /// </summary>
+        string EffectsPresetWhiteFrame { get; }
+
+        /// <summary>
+        /// Soft
+        /// </summary>
+        string EffectsPresetSoft { get; }
+
+        /// <summary>
+        /// Strong
+        /// </summary>
+        string EffectsPresetStrong { get; }
+
+        /// <summary>
+        /// Floating
+        /// </summary>
+        string EffectsPresetFloating { get; }
+
+        /// <summary>
+        /// White
+        /// </summary>
+        string EffectsPresetWhite { get; }
+
+        /// <summary>
+        /// Black
+        /// </summary>
+        string EffectsPresetBlack { get; }
+
+        /// <summary>
+        /// Copy style
+        /// </summary>
+        string CopyStyle { get; }
+
+        /// <summary>
+        /// Apply style
+        /// </summary>
+        string ApplyStyle { get; }
+
+        /// <summary>
+        /// Copy size
+        /// </summary>
+        string CopySize { get; }
+
+        /// <summary>
+        /// Apply size
+        /// </summary>
+        string ApplySize { get; }
+
+        /// <summary>
+        /// X (left)
+        /// </summary>
+        string ElementLeft { get; }
+
+        /// <summary>
+        /// Y (top)
+        /// </summary>
+        string ElementTop { get; }
+
+        /// <summary>
+        /// Width
+        /// </summary>
+        string ElementWidth { get; }
+
+        /// <summary>
+        /// Height
+        /// </summary>
+        string ElementHeight { get; }
+
+        /// <summary>
+        /// Search emoji
+        /// </summary>
+        string EmojiSearch { get; }
+
+        /// <summary>
+        /// No emoji found
+        /// </summary>
+        string EmojiSearchNoResults { get; }
+
+        /// <summary>
+        /// New image
+        /// </summary>
+        string NewImage { get; }
+
+        /// <summary>
+        /// Do you want to save the changes of these captures?
+        /// </summary>
+        string CloseOnSaveAll { get; }
+
+        /// <summary>
+        /// Save images?
+        /// </summary>
+        string CloseOnSaveAllTitle { get; }
+
+        /// <summary>
+        /// Save all
+        /// </summary>
+        string SaveAll { get; }
+
+        /// <summary>
+        /// Discard all
+        /// </summary>
+        string DiscardAll { get; }
+
+        /// <summary>
+        /// Confirm
+        /// </summary>
+        string Confirm { get; }
+
+        /// <summary>
+        /// Copy image to clipboard
+        /// </summary>
+        string Copyimagetoclipboard { get; }
+
+        /// <summary>
+        /// Copy path to clipboard
+        /// </summary>
+        string Copypathtoclipboard { get; }
+
+        /// <summary>
+        /// Copy
+        /// </summary>
+        string Copytoclipboard { get; }
+
+        /// <summary>
+        /// Add counter (I)
+        /// </summary>
+        string Counter { get; }
+
+        /// <summary>
+        /// Start value
+        /// </summary>
+        string CounterStartvalue { get; }
+
+        /// <summary>
+        /// Crop (C)
+        /// </summary>
+        string Crop { get; }
+
+        /// <summary>
+        /// Crop mode
+        /// </summary>
+        string CropMode { get; }
+
+        /// <summary>
+        /// Auto crop
+        /// </summary>
+        string CropmodeAuto { get; }
+
+        /// <summary>
+        /// Crop
+        /// </summary>
+        string CropmodeDefault { get; }
+
+        /// <summary>
+        /// Crop out horizontally
+        /// </summary>
+        string CropmodeHorizontal { get; }
+
+        /// <summary>
+        /// Crop out vertically
+        /// </summary>
+        string CropmodeVertical { get; }
+
+        /// <summary>
+        /// Apply to the image
+        /// </summary>
+        string ApplyToImage { get; }
+
+        /// <summary>
+        /// Cut edges
+        /// </summary>
+        string CutMark { get; }
+
+        /// <summary>
+        /// Straight
+        /// </summary>
+        string CutMarkLine { get; }
+
+        /// <summary>
+        /// None (seamless)
+        /// </summary>
+        string CutMarkNone { get; }
+
+        /// <summary>
+        /// New random edge
+        /// </summary>
+        string CutMarkReseed { get; }
+
+        /// <summary>
+        /// Cut edge settings...
+        /// </summary>
+        string CutMarkSettings { get; }
+
+        /// <summary>
+        /// Tooth range
+        /// </summary>
+        string CutMarkToothRange { get; }
+
+        /// <summary>
+        /// Torn
+        /// </summary>
+        string CutMarkTorn { get; }
+
+        /// <summary>
+        /// Wavy
+        /// </summary>
+        string CutMarkWave { get; }
+
+        /// <summary>
+        /// Zig-zag
+        /// </summary>
+        string CutMarkZigzag { get; }
+
+        /// <summary>
+        /// Selection Tool (ESC)
+        /// </summary>
+        string Cursortool { get; }
+
+        /// <summary>
+        /// Cut
+        /// </summary>
+        string Cuttoclipboard { get; }
+
+        /// <summary>
+        /// Delete
+        /// </summary>
+        string Deleteelement { get; }
+
+        /// <summary>
+        /// Down one level
+        /// </summary>
+        string Downonelevel { get; }
+
+        /// <summary>
+        /// Down to bottom
+        /// </summary>
+        string Downtobottom { get; }
+
+        /// <summary>
+        /// Draw arrow (A)
+        /// </summary>
+        string Drawarrow { get; }
+
+        /// <summary>
+        /// Draw ellipse (E)
+        /// </summary>
+        string Drawellipse { get; }
+
+        /// <summary>
+        /// Draw freehand (F)
+        /// </summary>
+        string Drawfreehand { get; }
+
+        /// <summary>
+        /// Highlight (H)
+        /// </summary>
+        string Drawhighlighter { get; }
+
+        /// <summary>
+        /// Draw line (L)
+        /// </summary>
+        string Drawline { get; }
+
+        /// <summary>
+        /// Draw rectangle (R)
+        /// </summary>
+        string Drawrectangle { get; }
+
+        /// <summary>
+        /// Add textbox (T)
+        /// </summary>
+        string Drawtextbox { get; }
+
+        /// <summary>
+        /// Shadow darkness
+        /// </summary>
+        string DropshadowDarkness { get; }
+
+        /// <summary>
+        /// Shadow offset
+        /// </summary>
+        string DropshadowOffset { get; }
+
+        /// <summary>
+        /// Shadow thickness
+        /// </summary>
+        string DropshadowThickness { get; }
+
+        /// <summary>
+        /// Duplicate selected element
+        /// </summary>
+        string Duplicate { get; }
+
+        /// <summary>
+        /// Edit
+        /// </summary>
+        string Edit { get; }
+
+        /// <summary>
+        /// Effects
+        /// </summary>
+        string Effects { get; }
+
+        /// <summary>
+        /// E-Mail
+        /// </summary>
+        string Email { get; }
+
+        /// <summary>
+        /// File
+        /// </summary>
+        string File { get; }
+
+        /// <summary>
+        /// Stretch
+        /// </summary>
+        string Fit { get; }
+
+        /// <summary>
+        /// Size
+        /// </summary>
+        string Fontsize { get; }
+
+        /// <summary>
+        /// Line color (NumPad0-9, Shift+0-9)
+        /// </summary>
+        string Forecolor { get; }
+
+        /// <summary>
+        /// Grayscale
+        /// </summary>
+        string Grayscale { get; }
+
+        /// <summary>
+        /// Highlight area
+        /// </summary>
+        string HighlightArea { get; }
+
+        /// <summary>
+        /// Grayscale
+        /// </summary>
+        string HighlightGrayscale { get; }
+
+        /// <summary>
+        /// Magnify
+        /// </summary>
+        string HighlightMagnify { get; }
+
+        /// <summary>
+        /// Highlight mode
+        /// </summary>
+        string HighlightMode { get; }
+
+        /// <summary>
+        /// Highlight text
+        /// </summary>
+        string HighlightText { get; }
+
+        /// <summary>
+        /// Image saved to {0}.
+        /// </summary>
+        string Imagesaved { get; }
+
+        /// <summary>
+        /// Drop shadow
+        /// </summary>
+        string ImageShadow { get; }
+
+        /// <summary>
+        /// Insert window
+        /// </summary>
+        string Insertwindow { get; }
+
+        /// <summary>
+        /// Invert
+        /// </summary>
+        string Invert { get; }
+
+        /// <summary>
+        /// Italic
+        /// </summary>
+        string Italic { get; }
+
+        /// <summary>
+        /// Load objects from file
+        /// </summary>
+        string LoadObjects { get; }
+
+        /// <summary>
+        /// Magnification factor
+        /// </summary>
+        string MagnificationFactor { get; }
+
+        /// <summary>
+        /// Match capture size
+        /// </summary>
+        string MatchCaptureSize { get; }
+
+        /// <summary>
+        /// Obfuscate (O)
+        /// </summary>
+        string Obfuscate { get; }
+
+        /// <summary>
+        /// Blur
+        /// </summary>
+        string ObfuscateBlur { get; }
+
+        /// <summary>
+        /// Obfuscation mode
+        /// </summary>
+        string ObfuscateMode { get; }
+
+        /// <summary>
+        /// Pixelize
+        /// </summary>
+        string ObfuscatePixelize { get; }
+
+        /// <summary>
+        /// Redact Text...
+        /// </summary>
+        string ObfuscateText { get; }
+
+        /// <summary>
+        /// Advanced Settings
+        /// </summary>
+        string ObfuscateTextAdvanced { get; }
+
+        /// <summary>
+        /// Effect:
+        /// </summary>
+        string ObfuscateTextEffect { get; }
+
+        /// <summary>
+        /// Pixel size (% of text height):
+        /// </summary>
+        string ObfuscateTextPixelSizeTextHeight { get; }
+
+        /// <summary>
+        /// Blur radius (% of text height):
+        /// </summary>
+        string ObfuscateTextBlurRadiusTextHeight { get; }
+
+        /// <summary>
+        /// Color:
+        /// </summary>
+        string ObfuscateTextColor { get; }
+
+        /// <summary>
+        /// Pick Color...
+        /// </summary>
+        string ObfuscateTextPickColor { get; }
+
+        /// <summary>
+        /// Magnification:
+        /// </summary>
+        string ObfuscateTextMagnification { get; }
+
+        /// <summary>
+        /// Horizontal padding:
+        /// </summary>
+        string ObfuscateTextHorizontalPadding { get; }
+
+        /// <summary>
+        /// Vertical padding:
+        /// </summary>
+        string ObfuscateTextVerticalPadding { get; }
+
+        /// <summary>
+        /// Horizontal offset:
+        /// </summary>
+        string ObfuscateTextHorizontalOffset { get; }
+
+        /// <summary>
+        /// Vertical offset:
+        /// </summary>
+        string ObfuscateTextVerticalOffset { get; }
+
+        /// <summary>
+        /// Invalid regex
+        /// </summary>
+        string ObfuscateTextInvalidRegex { get; }
+
+        /// <summary>
+        /// Apply
+        /// </summary>
+        string ObfuscateTextApply { get; }
+
+        /// <summary>
+        /// Auto Search
+        /// </summary>
+        string ObfuscateTextAutoSearch { get; }
+
+        /// <summary>
+        /// Case Sensitive
+        /// </summary>
+        string ObfuscateTextCaseSensitive { get; }
+
+        /// <summary>
+        /// Error
+        /// </summary>
+        string ObfuscateTextError { get; }
+
+        /// <summary>
+        /// Matches found: {0}
+        /// </summary>
+        string ObfuscateTextMatches { get; }
+
+        /// <summary>
+        /// No capture available
+        /// </summary>
+        string ObfuscateTextNoCapture { get; }
+
+        /// <summary>
+        /// OCR provider not available
+        /// </summary>
+        string ObfuscateTextNoOcrProvider { get; }
+
+        /// <summary>
+        /// No text found in image
+        /// </summary>
+        string ObfuscateTextNoText { get; }
+
+        /// <summary>
+        /// OCR failed
+        /// </summary>
+        string ObfuscateTextOcrFailed { get; }
+
+        /// <summary>
+        /// Use Regular Expression
+        /// </summary>
+        string ObfuscateTextRegex { get; }
+
+        /// <summary>
+        /// Lines
+        /// </summary>
+        string ObfuscateTextScopeLines { get; }
+
+        /// <summary>
+        /// Words
+        /// </summary>
+        string ObfuscateTextScopeWords { get; }
+
+        /// <summary>
+        /// Search for:
+        /// </summary>
+        string ObfuscateTextSearch { get; }
+
+        /// <summary>
+        /// Search
+        /// </summary>
+        string ObfuscateTextSearchButton { get; }
+
+        /// <summary>
+        /// Search in:
+        /// </summary>
+        string ObfuscateTextSearchScope { get; }
+
+        /// <summary>
+        /// Redact Text
+        /// </summary>
+        string ObfuscateTextTitle { get; }
+
+        /// <summary>
+        /// Object
+        /// </summary>
+        string Object { get; }
+
+        /// <summary>
+        /// Open directory in Windows Explorer
+        /// </summary>
+        string Opendirinexplorer { get; }
+
+        /// <summary>
+        /// Paste
+        /// </summary>
+        string Pastefromclipboard { get; }
+
+        /// <summary>
+        /// Pixel size
+        /// </summary>
+        string PixelSize { get; }
+
+        /// <summary>
+        /// Print
+        /// </summary>
+        string Print { get; }
+
+        /// <summary>
+        /// Expand capture and move outside
+        /// </summary>
+        string Pushout { get; }
+
+        /// <summary>
+        /// Redo {0}
+        /// </summary>
+        string Redo { get; }
+
+        /// <summary>
+        /// Remove transparency
+        /// </summary>
+        string RemoveTransparency { get; }
+
+        /// <summary>
+        /// Reset size
+        /// </summary>
+        string Resetsize { get; }
+
+        /// <summary>
+        /// Resize (Z)
+        /// </summary>
+        string Resize { get; }
+
+        /// <summary>
+        /// Maintain aspect ratio
+        /// </summary>
+        string ResizeAspectratio { get; }
+
+        /// <summary>
+        /// Height
+        /// </summary>
+        string ResizeHeight { get; }
+
+
+
+        /// <summary>
+        /// Width
+        /// </summary>
+        string ResizeWidth { get; }
+
+        /// <summary>
+        /// Rotate counter clockwise (Control + ,)
+        /// </summary>
+        string Rotateccw { get; }
+
+        /// <summary>
+        /// Rotate clockwise (Control + .)
+        /// </summary>
+        string Rotatecw { get; }
+
+        /// <summary>
+        /// Save
+        /// </summary>
+        string Save { get; }
+
+        /// <summary>
+        /// Save as...
+        /// </summary>
+        string Saveas { get; }
+
+        /// <summary>
+        /// Save objects to file
+        /// </summary>
+        string SaveObjects { get; }
+
+        /// <summary>
+        /// Select all
+        /// </summary>
+        string Selectall { get; }
+
+        /// <summary>
+        /// Print job was sent to '{0}'.
+        /// </summary>
+        string Senttoprinter { get; }
+
+        /// <summary>
+        /// Drop shadow (/)
+        /// </summary>
+        string Shadow { get; }
+
+        /// <summary>
+        /// Dock to edge
+        /// </summary>
+        string Snap { get; }
+
+        /// <summary>
+        /// Add speechbubble (S)
+        /// </summary>
+        string Speechbubble { get; }
+
+        /// <summary>
+        /// Image stored to clipboard.
+        /// </summary>
+        string Storedtoclipboard { get; }
+
+        /// <summary>
+        /// Line thickness
+        /// </summary>
+        string Thickness { get; }
+
+        /// <summary>
+        /// Greenshot image editor
+        /// </summary>
+        string Title { get; }
+
+        /// <summary>
+        /// Torn edge
+        /// </summary>
+        string TornEdge { get; }
+
+        /// <summary>
+        /// Tear all sides
+        /// </summary>
+        string TornedgeAll { get; }
+
+        /// <summary>
+        /// Bottom side
+        /// </summary>
+        string TornedgeBottom { get; }
+
+        /// <summary>
+        /// Horizontal tooth range
+        /// </summary>
+        string TornedgeHorizontaltoothrange { get; }
+
+        /// <summary>
+        /// Left side
+        /// </summary>
+        string TornedgeLeft { get; }
+
+        /// <summary>
+        /// Background color
+        /// </summary>
+        string TornedgeBackgroundColor { get; }
+
+        /// <summary>
+        /// Right side
+        /// </summary>
+        string TornedgeRight { get; }
+
+        /// <summary>
+        /// Torn edges settings
+        /// </summary>
+        string TornedgeSettings { get; }
+
+        /// <summary>
+        /// Generate shadow
+        /// </summary>
+        string TornedgeShadow { get; }
+
+        /// <summary>
+        /// Tooth size
+        /// </summary>
+        string TornedgeToothsize { get; }
+
+        /// <summary>
+        /// Top side
+        /// </summary>
+        string TornedgeTop { get; }
+
+        /// <summary>
+        /// Vertical tooth range
+        /// </summary>
+        string TornedgeVerticaltoothrange { get; }
+
+        /// <summary>
+        /// Undo {0}
+        /// </summary>
+        string Undo { get; }
+
+        /// <summary>
+        /// Up one level
+        /// </summary>
+        string Uponelevel { get; }
+
+        /// <summary>
+        /// Up to top
+        /// </summary>
+        string Uptotop { get; }
+
+        /// <summary>
+        /// Open images
+        /// </summary>
+        string TabList { get; }
+
+        /// <summary>
+        /// {0}, modified
+        /// </summary>
+        string TabModified { get; }
+
+        /// <summary>
+        /// Move tab left
+        /// </summary>
+        string MoveTabLeft { get; }
+
+        /// <summary>
+        /// Move tab right
+        /// </summary>
+        string MoveTabRight { get; }
+
+        /// <summary>
+        /// Move tab to a new window
+        /// </summary>
+        string MoveTabToNewWindow { get; }
+
+        /// <summary>
+        /// Font
+        /// </summary>
+        string FontFamily { get; }
+
+        /// <summary>
+        /// Color: {0}
+        /// </summary>
+        string ColorValue { get; }
+
+        /// <summary>
+        /// Color: {0}, opacity {1} %
+        /// </summary>
+        string ColorValueOpacity { get; }
+
+        /// <summary>
+        /// Transparent
+        /// </summary>
+        string ColorTransparent { get; }
+
+        /// <summary>
+        /// Canvas
+        /// </summary>
+        string Canvas { get; }
+
+        /// <summary>
+        /// {0} × {1} pixels
+        /// </summary>
+        string CanvasSize { get; }
+
+        /// <summary>
+        /// Arrow
+        /// </summary>
+        string ElementArrow { get; }
+
+        /// <summary>
+        /// {0} × {1} at {2}, {3}
+        /// </summary>
+        string ElementBounds { get; }
+
+        /// <summary>
+        /// Counter
+        /// </summary>
+        string ElementCounter { get; }
+
+        /// <summary>
+        /// Crop area
+        /// </summary>
+        string ElementCrop { get; }
+
+        /// <summary>
+        /// Mouse pointer
+        /// </summary>
+        string ElementCursor { get; }
+
+        /// <summary>
+        /// Cut edge
+        /// </summary>
+        string ElementCutMark { get; }
+
+        /// <summary>
+        /// Ellipse
+        /// </summary>
+        string ElementEllipse { get; }
+
+        /// <summary>
+        /// Emoji
+        /// </summary>
+        string ElementEmoji { get; }
+
+        /// <summary>
+        /// Freehand line
+        /// </summary>
+        string ElementFreehand { get; }
+
+        /// <summary>
+        /// Highlight
+        /// </summary>
+        string ElementHighlight { get; }
+
+        /// <summary>
+        /// Icon
+        /// </summary>
+        string ElementIcon { get; }
+
+        /// <summary>
+        /// Image
+        /// </summary>
+        string ElementImage { get; }
+
+        /// <summary>
+        /// Line
+        /// </summary>
+        string ElementLine { get; }
+
+        /// <summary>
+        /// Obfuscation
+        /// </summary>
+        string ElementObfuscate { get; }
+
+        /// <summary>
+        /// Rectangle
+        /// </summary>
+        string ElementRectangle { get; }
+
+        /// <summary>
+        /// Speech bubble
+        /// </summary>
+        string ElementSpeechbubble { get; }
+
+        /// <summary>
+        /// Text
+        /// </summary>
+        string ElementText { get; }
+
+        /// <summary>
+        /// {0}: {1}
+        /// </summary>
+        string ElementWithText { get; }
+    }
+}

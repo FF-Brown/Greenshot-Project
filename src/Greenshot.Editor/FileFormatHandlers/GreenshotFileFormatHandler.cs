@@ -1,13 +1,13 @@
 ﻿/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -22,10 +22,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Imaging;
 using System.IO;
-using System.Reflection;
-using System.Text;
 using Greenshot.Base.Core;
 using Greenshot.Base.Interfaces;
 using Greenshot.Base.Interfaces.Plugin;
@@ -42,6 +39,8 @@ namespace Greenshot.Editor.FileFormatHandlers
             SupportedExtensions[FileFormatHandlerActions.LoadDrawableFromStream] = _ourExtensions;
             SupportedExtensions[FileFormatHandlerActions.LoadFromStream] = _ourExtensions;
             SupportedExtensions[FileFormatHandlerActions.SaveToStream] = _ourExtensions;
+            SupportedExtensions[FileFormatHandlerActions.SaveToFile] = _ourExtensions;
+            SupportedExtensions[FileFormatHandlerActions.LoadFromFile] = _ourExtensions;
         }
 
         public override bool TrySaveToStream(Bitmap bitmap, Stream stream, string extension, ISurface surface = null, SurfaceOutputSettings surfaceOutputSettings = null)
@@ -53,15 +52,9 @@ namespace Greenshot.Editor.FileFormatHandlers
 
             try
             {
-                bitmap.Save(stream, ImageFormat.Png);
-                using MemoryStream tmpStream = new MemoryStream();
-                long bytesWritten = surface.SaveElementsToStream(tmpStream);
-                using BinaryWriter writer = new BinaryWriter(tmpStream);
-                writer.Write(bytesWritten);
-                Version v = Assembly.GetExecutingAssembly().GetName().Version;
-                byte[] marker = Encoding.ASCII.GetBytes($"Greenshot{v.Major:00}.{v.Minor:00}");
-                writer.Write(marker);
-                tmpStream.WriteTo(stream);
+                using MemoryStream elements = RecyclableMemoryStreamFactory.GetStream("GreenshotFileFormatHandler.SaveToStream");
+                long elementsLength = surface.SaveElementsToStream(elements);
+                ImageIO.WriteGreenshotFormat(stream, bitmap, elements, elementsLength);
                 return true;
             }
             catch (Exception ex)
@@ -76,7 +69,8 @@ namespace Greenshot.Editor.FileFormatHandlers
         {
             try
             {
-                var surface = LoadSurface(stream);
+                // The export is a new image, the surface with its own copy and elements isn't needed afterwards
+                using var surface = LoadSurface(stream);
                 bitmap = (Bitmap)surface.GetImageForExport();
                 return true;
             }
@@ -88,7 +82,7 @@ namespace Greenshot.Editor.FileFormatHandlers
             return false;
         }
 
-        private ISurface LoadSurface(Stream surfaceFileStream)
+        public override ISurface LoadSurface(Stream surfaceFileStream)
         {
             var returnSurface = SimpleServiceProvider.Current.GetInstance<Func<ISurface>>().Invoke();
             Bitmap captureBitmap;
@@ -127,6 +121,10 @@ namespace Greenshot.Editor.FileFormatHandlers
                 Log.InfoFormat("Information about .greenshot file: {0}x{1}-{2} Resolution {3}x{4}", captureBitmap.Width, captureBitmap.Height, captureBitmap.PixelFormat, captureBitmap.HorizontalResolution, captureBitmap.VerticalResolution);
             }
 
+            // The file is opened as it was saved: nothing is changed yet, so closing it doesn't ask to save (BUG-2274),
+            // and nothing is selected, so a click picks one element instead of moving all of them (BUG-2908)
+            returnSurface.DeselectAllElements();
+            returnSurface.Modified = false;
             return returnSurface;
         }
     }

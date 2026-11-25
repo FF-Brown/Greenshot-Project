@@ -1,0 +1,358 @@
+/*
+ * Greenshot - a free and open source screenshot tool
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
+ * 
+ * For more information see: https://getgreenshot.org/
+ * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+using System;
+using System.Threading.Tasks;
+using System.Drawing;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
+using System.Windows.Forms;
+using Dapplo.Windows.User32;
+using Xunit;
+using Greenshot.Base.Native.DirectX;
+using Greenshot.Base.Native;
+
+namespace Greenshot.Tests.Core;
+
+/// <summary>
+/// A custom xUnit Fact attribute that dynamically marks the test as Skipped
+/// when no display has HDR enabled.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
+public sealed class HdrFactAttribute : FactAttribute
+{
+    public HdrFactAttribute([CallerFilePath] string sourceFilePath = null, [CallerLineNumber] int sourceLineNumber = -1) : base(sourceFilePath, sourceLineNumber)
+    {
+        try
+        {
+            if (FindHdrMonitor() == IntPtr.Zero)
+            {
+                Skip = "HDR is not currently enabled on any display.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Skip = $"Failed to query display HDR status: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// The first monitor with HDR enabled, IntPtr.Zero when there is none
+    /// </summary>
+    public static IntPtr FindHdrMonitor() =>
+        DisplayInfo.AllDisplayInfos.Select(display => display.MonitorHandle).FirstOrDefault(HdrDisplayInfo.IsHdrActiveForMonitor);
+}
+
+public class WindowsGraphicsCaptureTests
+{
+    private readonly ITestOutputHelper _output;
+
+    public WindowsGraphicsCaptureTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
+    [Fact]
+    public void TestDisplayHdrDetection()
+    {
+        IntPtr primaryMonitor = HdrDisplayInfo.GetMonitorForWindow(IntPtr.Zero);
+        _output.WriteLine($"Primary monitor handle: {primaryMonitor}");
+        bool isHdr = HdrDisplayInfo.IsHdrActiveForMonitor(primaryMonitor);
+        float sdrWhite = HdrDisplayInfo.GetSdrWhiteLevelInNits(primaryMonitor);
+        _output.WriteLine($"Monitor HDR active: {isHdr}, SDR white level: {sdrWhite} nits");
+    }
+
+    [HdrFact]
+    public async Task TestCaptureHdrMonitor()
+    {
+        IntPtr hdrMonitor = HdrFactAttribute.FindHdrMonitor();
+        _output.WriteLine($"Capturing monitor {hdrMonitor}...");
+
+        using var bitmap = await WindowsGraphicsCaptureInterop.CaptureMonitorToBitmapAsync(hdrMonitor);
+        _output.WriteLine($"Capture result: {(bitmap != null ? $"{bitmap.Width}x{bitmap.Height}" : "null")}");
+        Assert.NotNull(bitmap);
+    }
+
+    [HdrFact]
+    public async Task TestCaptureAreaOfHdrMonitor_WithHdrImage()
+    {
+        IntPtr hdrMonitor = HdrFactAttribute.FindHdrMonitor();
+        var bounds = DisplayInfo.AllDisplayInfos.First(display => display.MonitorHandle == hdrMonitor).Bounds;
+        // A part of the HDR monitor only: measured, tone mapped and read back is only this area
+        var area = new Dapplo.Windows.Common.Structs.NativeRect(bounds.X + 100, bounds.Y + 100, 300, 200);
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var (bitmap, hdrParts) = await WindowsGraphicsCaptureInterop.CaptureRectangleWithHdrAsync(area);
+        _output.WriteLine($"Captured {area} in {stopwatch.ElapsedMilliseconds} ms");
+        using (bitmap)
+        using (hdrParts)
+        {
+            Assert.NotNull(bitmap);
+            Assert.Equal(300, bitmap.Width);
+            Assert.Equal(200, bitmap.Height);
+            Assert.NotNull(hdrParts);
+            Assert.Equal(new Dapplo.Windows.Common.Structs.NativeRect(0, 0, 300, 200), Assert.Single(hdrParts.Areas));
+            // The capture is written, not left transparent
+            Assert.Equal(255, bitmap.GetPixel(150, 100).A);
+        }
+    }
+
+    [HdrFact]
+    public async Task TestCaptureAcrossMonitors_SdrAndHdr()
+    {
+        IntPtr hdrMonitor = HdrFactAttribute.FindHdrMonitor();
+        var displays = DisplayInfo.AllDisplayInfos;
+        var hdrBounds = displays.First(display => display.MonitorHandle == hdrMonitor).Bounds;
+        var other = displays.FirstOrDefault(display => display.MonitorHandle != hdrMonitor && display.Bounds.Top <= hdrBounds.Top + 100 && display.Bounds.Bottom >= hdrBounds.Top + 300
+            && (display.Bounds.Right == hdrBounds.Left || display.Bounds.Left == hdrBounds.Right));
+        if (other == null)
+        {
+            Assert.Skip("No monitor next to the HDR monitor.");
+        }
+        int seam = other.Bounds.Right == hdrBounds.Left ? hdrBounds.Left : hdrBounds.Right;
+        var area = new Dapplo.Windows.Common.Structs.NativeRect(seam - 150, hdrBounds.Top + 100, 300, 200);
+
+        var (bitmap, hdrParts) = await WindowsGraphicsCaptureInterop.CaptureRectangleWithHdrAsync(area);
+        _output.WriteLine($"Captured {area} across {other.Bounds} and {hdrBounds}");
+        using (bitmap)
+        using (hdrParts)
+        {
+            Assert.NotNull(bitmap);
+            Assert.Equal(300, bitmap.Width);
+            // Both halves are written: the HDR monitor's part straight into the result like the SDR monitor's
+            Assert.Equal(255, bitmap.GetPixel(75, 100).A);
+            Assert.Equal(255, bitmap.GetPixel(225, 100).A);
+            // Only the HDR monitor's half is kept until the area is joined, the SDR half is in the bitmap
+            Assert.NotNull(hdrParts);
+            Assert.Equal(150, Assert.Single(hdrParts.Areas).Width);
+        }
+    }
+
+    [HdrFact]
+    public async Task TestCaptureWholeScreen_KeepsOnlyTheHdrMonitors()
+    {
+        // Like the frozen screen with Hdr: everything is captured, the HDR content only of the HDR monitors
+        IntPtr hdrMonitor = HdrFactAttribute.FindHdrMonitor();
+        var displays = DisplayInfo.AllDisplayInfos;
+        var hdrBounds = displays.First(display => display.MonitorHandle == hdrMonitor).Bounds;
+        var screen = DisplayInfo.ScreenBounds;
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var (bitmap, hdrParts) = await WindowsGraphicsCaptureInterop.CaptureRectangleWithHdrAsync(screen);
+        _output.WriteLine($"Captured the screen {screen} in {stopwatch.ElapsedMilliseconds} ms, HDR parts: {string.Join(", ", hdrParts?.Areas ?? new Dapplo.Windows.Common.Structs.NativeRect[0])}");
+        using (bitmap)
+        using (hdrParts)
+        {
+            Assert.NotNull(bitmap);
+            Assert.NotNull(hdrParts);
+            // Nothing is joined while the region isn't known: only the HDR monitors are kept
+            Assert.Contains(hdrParts.Areas, area => area.Width == hdrBounds.Width && area.Height == hdrBounds.Height
+                && area.X == hdrBounds.X - screen.X && area.Y == hdrBounds.Y - screen.Y);
+            Assert.True(hdrParts.Areas.Count < displays.Length || displays.Length == 1);
+        }
+    }
+
+    [Fact]
+    public void TestCaptureSessionBorderRequiredInterop()
+    {
+        IntPtr primaryMonitor = HdrDisplayInfo.GetMonitorForWindow(IntPtr.Zero);
+        WindowsGraphicsCaptureInterop.CreateD3D11Device(out var d3d11Device, out var context);
+        try
+        {
+            var captureItem = WindowsGraphicsCaptureInterop.CreateCaptureItemForMonitor(primaryMonitor);
+            Assert.NotNull(captureItem);
+
+            var d3dInterOpDevice = WindowsGraphicsCaptureInterop.CreateID3DDeviceFromD3D11Device(d3d11Device);
+            using var framePool = Windows.Graphics.Capture.Direct3D11CaptureFramePool.CreateFreeThreaded(
+                d3dInterOpDevice,
+                Windows.Graphics.DirectX.DirectXPixelFormat.B8G8R8A8UIntNormalized,
+                1,
+                captureItem.Size);
+            using var session = framePool.CreateCaptureSession(captureItem);
+            Assert.NotNull(session);
+
+            bool isWin11 = Environment.OSVersion.Version.Build >= 22000;
+            _output.WriteLine($"OS Build: {Environment.OSVersion.Version.Build}, isWin11: {isWin11}");
+
+            if ((object)session is IGraphicsCaptureSession3 session3)
+            {
+                _output.WriteLine("session implements IGraphicsCaptureSession3 successfully.");
+                bool initial = session3.IsBorderRequired;
+                _output.WriteLine($"Initial IsBorderRequired: {initial}");
+                session3.IsBorderRequired = false;
+                Assert.False(session3.IsBorderRequired);
+                _output.WriteLine("Successfully set IsBorderRequired to false!");
+            }
+            else
+            {
+                _output.WriteLine("session does NOT implement IGraphicsCaptureSession3 (expected on Windows 10).");
+                Assert.False(isWin11, "Expected Windows 11 build to implement IGraphicsCaptureSession3");
+            }
+        }
+        finally
+        {
+            if (context != null) Marshal.ReleaseComObject(context);
+            if (d3d11Device != null) Marshal.ReleaseComObject(d3d11Device);
+        }
+    }
+
+    [Fact]
+    public async Task TestCaptureRectangle_SingleMonitor_ReturnsValidBitmap()
+    {
+        var primaryDisplay = DisplayInfo.AllDisplayInfos.FirstOrDefault(d => d.IsPrimary) ?? DisplayInfo.AllDisplayInfos.First();
+        Assert.NotNull(primaryDisplay);
+
+        using var bitmap = await WindowsGraphicsCaptureInterop.CaptureRectangleAsync(primaryDisplay.Bounds);
+        Assert.NotNull(bitmap);
+        Assert.Equal(primaryDisplay.Bounds.Width, bitmap.Width);
+        Assert.Equal(primaryDisplay.Bounds.Height, bitmap.Height);
+    }
+
+    [Fact]
+    public async Task TestRepeatedCapture_ReusesCachedDevice()
+    {
+        IntPtr primaryMonitor = HdrDisplayInfo.GetMonitorForWindow(IntPtr.Zero);
+        using var first = await WindowsGraphicsCaptureInterop.CaptureMonitorToBitmapAsync(primaryMonitor);
+        Assert.NotNull(first);
+
+        using var second = await WindowsGraphicsCaptureInterop.CaptureMonitorToBitmapAsync(primaryMonitor);
+        Assert.NotNull(second);
+        Assert.Equal(first.Width, second.Width);
+        Assert.Equal(first.Height, second.Height);
+    }
+
+    [Fact]
+    public unsafe void TestUnpremultiplyRow()
+    {
+        // B, G, R, A: opaque, transparent, half transparent, a quarter transparent
+        byte[] pixels =
+        {
+            10, 20, 30, 255,
+            0, 0, 0, 0,
+            50, 64, 100, 128,
+            16, 32, 64, 64
+        };
+        fixed (byte* row = pixels)
+        {
+            WindowsGraphicsCaptureInterop.UnpremultiplyRow(row, 4);
+        }
+
+        Assert.Equal(new byte[] { 10, 20, 30, 255 }, pixels.Take(4).ToArray());
+        Assert.Equal(new byte[] { 0, 0, 0, 0 }, pixels.Skip(4).Take(4).ToArray());
+        // 50 * 255 / 128 = 99.6, 64 * 255 / 128 = 127.5, 100 * 255 / 128 = 199.2
+        Assert.Equal(new byte[] { 100, 128, 199, 128 }, pixels.Skip(8).Take(4).ToArray());
+        // 64 * 255 / 64 = 255: stays in range
+        Assert.Equal(new byte[] { 64, 128, 255, 64 }, pixels.Skip(12).Take(4).ToArray());
+    }
+
+    [Fact]
+    public void TestWarpDeviceCanBeCreated()
+    {
+        // The fallback when there is no usable GPU (virtual machine, RDP): WARP must deliver a device WGC can use
+        int hr = WindowsGraphicsCaptureInterop.CreateD3D11Device(WindowsGraphicsCaptureInterop.WarpDriverType, out var device, out var context);
+        Assert.Equal(0, hr);
+        try
+        {
+            var winrtDevice = WindowsGraphicsCaptureInterop.CreateID3DDeviceFromD3D11Device(device);
+            Assert.NotNull(winrtDevice);
+            (winrtDevice as IDisposable)?.Dispose();
+        }
+        finally
+        {
+            Marshal.ReleaseComObject(context);
+            Marshal.ReleaseComObject(device);
+        }
+    }
+
+    [Fact]
+    public async Task TestCaptureChildWindow_CapturesTopLevelAndCrops()
+    {
+        if (!WindowsGraphicsCaptureInterop.IsSupported)
+        {
+            _output.WriteLine("Windows Graphics Capture isn't supported here.");
+            return;
+        }
+
+        Panel child = null;
+        using var host = await TestFormHost.ShowAsync(() =>
+        {
+            var form = new Form
+            {
+                StartPosition = FormStartPosition.Manual,
+                FormBorderStyle = FormBorderStyle.None,
+                ShowInTaskbar = false,
+                Bounds = new Rectangle(100, 100, 300, 200),
+                BackColor = Color.Red,
+                TopMost = true
+            };
+            child = new Panel
+            {
+                Bounds = new Rectangle(40, 30, 120, 80),
+                BackColor = Color.Blue
+            };
+            form.Controls.Add(child);
+            return form;
+        });
+
+        IntPtr childHandle = IntPtr.Zero;
+        await host.InvokeAsync(_ => childHandle = child.Handle);
+
+        using var bitmap = await WindowsGraphicsCaptureInterop.CaptureWindowToBitmapAsync(childHandle);
+        Assert.NotNull(bitmap);
+        Assert.Equal(120, bitmap.Width);
+        Assert.Equal(80, bitmap.Height);
+        var center = bitmap.GetPixel(60, 40);
+        _output.WriteLine($"Center pixel of the child: {center}");
+        Assert.True(center.B > 200 && center.R < 50, $"Expected the blue child, got {center}");
+    }
+
+    [Fact]
+    public async Task TestCaptureMinimizedWindow_RestoresIt()
+    {
+        if (!WindowsGraphicsCaptureInterop.IsSupported)
+        {
+            _output.WriteLine("Windows Graphics Capture isn't supported here.");
+            return;
+        }
+
+        using var host = await TestFormHost.ShowAsync(() => new Form
+        {
+            StartPosition = FormStartPosition.Manual,
+            FormBorderStyle = FormBorderStyle.None,
+            Bounds = new Rectangle(120, 120, 240, 160),
+            BackColor = Color.Green,
+            Text = "Greenshot minimized capture test"
+        }, form => form.WindowState = FormWindowState.Minimized);
+
+        IntPtr handle = IntPtr.Zero;
+        await host.InvokeAsync(form => handle = form.Handle);
+        Assert.True(User32Api.IsIconic(handle));
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        using var bitmap = await WindowsGraphicsCaptureInterop.CaptureWindowToBitmapAsync(handle);
+        _output.WriteLine($"Capture of the minimized window took {stopwatch.ElapsedMilliseconds} ms");
+        Assert.NotNull(bitmap);
+        Assert.False(User32Api.IsIconic(handle));
+        Assert.Equal(240, bitmap.Width);
+        Assert.Equal(160, bitmap.Height);
+    }
+}

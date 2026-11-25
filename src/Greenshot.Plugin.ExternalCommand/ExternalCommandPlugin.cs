@@ -1,13 +1,13 @@
-﻿/*
+/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -23,181 +23,152 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
-using System.Windows.Forms;
 using Greenshot.Base.Core;
-using Greenshot.Base.IniFile;
+using Greenshot.Base.Definitions;
+using Dapplo.Ini;
 using Greenshot.Base.Interfaces;
 using Greenshot.Base.Interfaces.Plugin;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Greenshot.Base.Recipes.Pipeline;
+using Greenshot.Base.Threading;
 
-namespace Greenshot.Plugin.ExternalCommand
+using Greenshot.Base.Languages;
+using Greenshot.Plugin.ExternalCommand.Destinations;
+using Greenshot.Plugin.ExternalCommand.Recipes;
+using Greenshot.Plugin.ExternalCommand.Running;
+using Greenshot.Plugin.ExternalCommand.ViewModels;
+using Greenshot.Plugin.ExternalCommand.Views;
+using Greenshot.Base.Expressions;
+
+namespace Greenshot.Plugin.ExternalCommand;
+
+/// <summary>
+/// An Plugin to run commands after an image was written
+/// </summary>
+public class ExternalCommandPlugin : IGreenshotPlugin, IConfigurablePlugin, IRecipeStepProvider
 {
-    /// <summary>
-    /// An Plugin to run commands after an image was written
-    /// </summary>
-    public class ExternalCommandPlugin : IGreenshotPlugin
+    private static readonly log4net.ILog Log = log4net.LogManager.GetLogger(typeof(ExternalCommandPlugin));
+
+    public ValueTask DisposeAsync()
     {
-        private static readonly log4net.ILog Log = log4net.LogManager.GetLogger(typeof(ExternalCommandPlugin));
-        private static readonly CoreConfiguration CoreConfig = IniConfig.GetIniSection<CoreConfiguration>();
-        private static readonly ExternalCommandConfiguration ExternalCommandConfig = IniConfig.GetIniSection<ExternalCommandConfiguration>();
-        private ToolStripMenuItem _itemPlugInRoot;
+        return default;
+    }
 
-        public void Dispose()
+    /// <summary>
+    /// Name of the plugin
+    /// </summary>
+    public string Name => "ExternalCommand";
+
+    /// <summary>
+    /// The program of the command can be started now: a file, or a program on the PATH (also an App Execution Alias of a Windows App)
+    /// </summary>
+    private static bool CanRun(CommandDefinition command)
+    {
+        string program = OutputTemplates.RenderCommand(command.Program, VariableScope.Empty, out string problem);
+        if (program == null)
         {
-            Dispose(true);
-            GC.SuppressFinalize(this);
+            Log.WarnFormat("The program {0} of the command {1} can't be used, the command is left out until the next start: {2}", command.Program, command.Name, problem);
+            return false;
         }
 
-        private void Dispose(bool disposing)
+        if (WindowsAppLauncher.AppIdOf(program) is { } appId)
         {
-            if (!disposing) return;
-            if (_itemPlugInRoot == null) return;
-            _itemPlugInRoot.Dispose();
-            _itemPlugInRoot = null;
+            if (WindowsAppLauncher.IsInstalled(appId)) return true;
+            Log.WarnFormat("The Windows App {0} of the command {1} isn't installed, the command is left out until the next start", appId, command.Name);
+            return false;
         }
 
-        /// <summary>
-        /// Name of the plugin
-        /// </summary>
-        public string Name => "ExternalCommand";
-
-        /// <summary>
-        /// Specifies if the plugin can be configured
-        /// </summary>
-        public bool IsConfigurable => true;
-
-        private IEnumerable<IDestination> Destinations()
+        if (!File.Exists(program) && PluginUtils.GetExePath(program) == null)
         {
-            foreach (string command in ExternalCommandConfig.Commands)
-            {
-                yield return new ExternalCommandDestination(command);
-            }
+            Log.WarnFormat("The program {0} of the command {1} isn't found, the command is left out until the next start", command.Program, command.Name);
+            return false;
         }
 
+        return true;
+    }
 
-        /// <summary>
-        /// Check and eventually fix the command settings
-        /// </summary>
-        /// <param name="command"></param>
-        /// <returns>false if the command is not correctly configured</returns>
-        private bool IsCommandValid(string command)
+    public void ConfigureServices(IPluginServices services)
+    {
+        Texts.Register<IExternalCommandLanguage>(new ExternalCommandLanguageImpl());
+        var externalCommandSection = new ExternalCommandConfigurationImpl();
+        services.AddConfiguration(externalCommandSection);
+
+        services.AddService<IIconProvider>(new ExternalCommandIconProvider());
+        // The destinations come from the loaded configuration
+        services.AddServices(CreateDestinations);
+        services.AddRecipeStepProvider(this);
+        services.AddSettingsView<CommandSettingsViewModel>(viewModel => new CommandSettingsView(viewModel));
+    }
+
+    public object CreateSettingsViewModel(IServiceProvider services) => new CommandSettingsViewModel(CommandDefinitions.CreateStore());
+
+    /// <summary>
+    /// The destinations of the commands which can run now. A command whose program isn't found (a USB stick or network drive which
+    /// isn't there yet) stays in the settings, it only gets no destination until the next start. Commands added in the settings get
+    /// theirs with the next start too, an approved one at once, a change of a command applies at once.
+    /// </summary>
+    private static IEnumerable<IDestination> CreateDestinations()
+    {
+        return CommandDefinitions.CreateStore().GetReadable()
+            .Where(command => !CommandDefinitions.IsTurnedOff(command.Name) && CanRun(command))
+            .Select(command => (IDestination)new ExternalCommandDestination(command, readsSettings: true))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Registers recipe step factories provided by the ExternalCommand plugin.
+    /// </summary>
+    /// <param name="registry">The step registry.</param>
+    public void RegisterSteps(IStepRegistry registry)
+    {
+        if (registry == null) return;
+        registry.Register<ExternalCommandStep>(config => new ExternalCommandStep(config));
+    }
+
+    /// <summary>
+    /// Like the recipe files: a command file added or changed outside Greenshot is left out at the start, once Greenshot runs
+    /// the user sees what it runs and decides whether to use it
+    /// </summary>
+    public Task StartAsync(IServiceProvider services, CancellationToken cancellationToken)
+    {
+        DefinitionApprovalAtStartup.AskWhenIdle(CommandDefinitions.CreateStore, ConfirmAtStartup, AddDestination);
+        return Task.CompletedTask;
+    }
+
+    private static bool ConfirmAtStartup(StoredDefinition<CommandDefinition> stored)
+    {
+        var language = Texts.Get<IExternalCommandLanguage>();
+        return DefinitionImport.Confirm(null, CommandSettingsViewModel.DescribeApproval(stored.Definition, stored.Id),
+            new[] { language.ApproveButton, language.ApproveLater }) == 0;
+    }
+
+    /// <summary>
+    /// The destination of a command which was approved after the start, when its program can be started
+    /// </summary>
+    internal static void AddDestination(CommandDefinition command)
+    {
+        if (command != null && !CommandDefinitions.IsTurnedOff(command.Name) && CanRun(command)
+            && !SimpleServiceProvider.Current.GetAllInstances<IDestination>().Any(destination => destination.Designation == ExternalCommandDestination.DesignationOf(command.Name)))
         {
-            if (!ExternalCommandConfig.RunInbackground.ContainsKey(command))
-            {
-                Log.WarnFormat("Found missing runInbackground for {0}", command);
-                // Fix it
-                ExternalCommandConfig.RunInbackground.Add(command, true);
-            }
-
-            if (!ExternalCommandConfig.Argument.ContainsKey(command))
-            {
-                Log.WarnFormat("Found missing argument for {0}", command);
-                // Fix it
-                ExternalCommandConfig.Argument.Add(command, "{0}");
-            }
-
-            if (!ExternalCommandConfig.Commandline.ContainsKey(command))
-            {
-                Log.WarnFormat("Found missing commandline for {0}", command);
-                return false;
-            }
-
-            string commandline = FilenameHelper.FillVariables(ExternalCommandConfig.Commandline[command], true);
-            commandline = FilenameHelper.FillCmdVariables(commandline, true);
-
-            if (!File.Exists(commandline))
-            {
-                Log.WarnFormat("Found 'invalid' commandline {0} for command {1}", ExternalCommandConfig.Commandline[command], command);
-                return false;
-            }
-
-            return true;
-        }
-
-        /// <summary>
-        /// Implementation of the IGreenshotPlugin.Initialize
-        /// </summary>
-        public virtual bool Initialize()
-        {
-            Log.DebugFormat("Initialize called");
-
-            var commandsToDelete = new List<string>();
-            // Check configuration
-            foreach (string command in ExternalCommandConfig.Commands)
-            {
-                if (!IsCommandValid(command))
-                {
-                    commandsToDelete.Add(command);
-                }
-            }
-
-            // cleanup
-            foreach (string command in commandsToDelete)
-            {
-                ExternalCommandConfig.Delete(command);
-            }
-
-            SimpleServiceProvider.Current.AddService(Destinations());
-
-            _itemPlugInRoot = new ToolStripMenuItem();
-            _itemPlugInRoot.Click += ConfigMenuClick;
-            OnIconSizeChanged(this, new PropertyChangedEventArgs("IconSize"));
-            OnLanguageChanged(this, null);
-
-            PluginUtils.AddToContextMenu(_itemPlugInRoot);
-            Language.LanguageChanged += OnLanguageChanged;
-            CoreConfig.PropertyChanged += OnIconSizeChanged;
-            return true;
-        }
-
-        /// <summary>
-        /// Fix icon reference
-        /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="e"></param>
-        private void OnIconSizeChanged(object sender, PropertyChangedEventArgs e)
-        {
-            if (e.PropertyName == "IconSize")
-            {
-                try
-                {
-                    string exePath = PluginUtils.GetExePath("cmd.exe");
-                    if (exePath != null && File.Exists(exePath))
-                    {
-                        _itemPlugInRoot.Image = PluginUtils.GetCachedExeIcon(exePath, 0);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Log.Warn("Couldn't get the cmd.exe image", ex);
-                }
-            }
-        }
-
-        private void OnLanguageChanged(object sender, EventArgs e)
-        {
-            if (_itemPlugInRoot != null)
-            {
-                _itemPlugInRoot.Text = Language.GetString("externalcommand", "contextmenu_configure");
-            }
-        }
-
-        public virtual void Shutdown()
-        {
-            Log.Debug("Shutdown");
-        }
-
-        private void ConfigMenuClick(object sender, EventArgs eventArgs)
-        {
-            Configure();
-        }
-
-        /// <summary>
-        /// Implementation of the IPlugin.Configure
-        /// </summary>
-        public virtual void Configure()
-        {
-            Log.Debug("Configure called");
-            new SettingsForm().ShowDialog();
+            SimpleServiceProvider.Current.AddService<IDestination>(new ExternalCommandDestination(command, readsSettings: true));
         }
     }
+
+    /// <summary>
+    /// A command which was turned off: its destination goes at once, from the menus and the destination settings
+    /// </summary>
+    internal static void RemoveDestination(string name)
+    {
+        string designation = ExternalCommandDestination.DesignationOf(name);
+        var destinations = SimpleServiceProvider.Current.GetAllInstances<IDestination>().OfType<ExternalCommandDestination>()
+            .Where(destination => destination.Designation == designation)
+            .Cast<IDestination>()
+            .ToList();
+        SimpleServiceProvider.Current.RemoveService(destinations);
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
 }

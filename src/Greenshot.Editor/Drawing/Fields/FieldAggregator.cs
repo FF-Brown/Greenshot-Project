@@ -1,13 +1,13 @@
 ﻿/*
  * Greenshot - a free and open source screenshot tool
- * Copyright (C) 2007-2021 Thomas Braun, Jens Klingen, Robin Krom
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
  * 
  * For more information see: https://getgreenshot.org/
  * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 1 of the License, or
+ * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
  * This program is distributed in the hope that it will be useful,
@@ -23,7 +23,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
-using Greenshot.Base.IniFile;
+using Greenshot.Base.Core;
 using Greenshot.Base.Interfaces;
 using Greenshot.Base.Interfaces.Drawing;
 using Greenshot.Editor.Configuration;
@@ -47,7 +47,8 @@ namespace Greenshot.Editor.Drawing.Fields
         private readonly IDrawableContainerList _boundContainers;
         private bool _internalUpdateRunning;
 
-        private static readonly EditorConfiguration EditorConfig = IniConfig.GetIniSection<EditorConfiguration>();
+        // EnsureSection like the other editor classes: whatever creates the first surface (also a test), the section is there
+        private static readonly IEditorConfiguration EditorConfig = IniConfigHelper.EnsureSection<IEditorConfiguration>(() => new EditorConfigurationImpl());
 
         public FieldAggregator(ISurface parent)
         {
@@ -71,21 +72,41 @@ namespace Greenshot.Editor.Drawing.Fields
 
         public void BindElements(IDrawableContainerList dcs)
         {
+            bool anyBound = false;
             foreach (var dc in dcs)
             {
-                BindElement(dc);
+                anyBound |= Bind(dc);
+            }
+
+            // Once for all elements, not for each element
+            if (anyBound)
+            {
+                UpdateFromBoundElements();
             }
         }
 
         public void BindElement(IDrawableContainer dc)
         {
+            if (Bind(dc))
+            {
+                UpdateFromBoundElements();
+            }
+        }
+
+        private bool Bind(IDrawableContainer dc)
+        {
             if (!(dc is DrawableContainer container) || _boundContainers.Contains(container))
             {
-                return;
+                return false;
             }
 
             _boundContainers.Add(container);
-            container.ChildrenChanged += delegate { UpdateFromBoundElements(); };
+            container.ChildrenChanged += OnBoundElementChildrenChanged;
+            return true;
+        }
+
+        private void OnBoundElementChildrenChanged(object sender, EventArgs e)
+        {
             UpdateFromBoundElements();
         }
 
@@ -120,12 +141,23 @@ namespace Greenshot.Editor.Drawing.Fields
             if (!_boundContainers.Contains(dc)) return;
 
             _boundContainers.Remove(dc);
+            if (dc is DrawableContainer container)
+            {
+                container.ChildrenChanged -= OnBoundElementChildrenChanged;
+            }
             UpdateFromBoundElements();
         }
 
         public void Clear()
         {
             ClearFields();
+            foreach (var dc in _boundContainers)
+            {
+                if (dc is DrawableContainer container)
+                {
+                    container.ChildrenChanged -= OnBoundElementChildrenChanged;
+                }
+            }
             _boundContainers.Clear();
             UpdateFromBoundElements();
         }
@@ -143,6 +175,11 @@ namespace Greenshot.Editor.Drawing.Fields
 
             _internalUpdateRunning = false;
         }
+
+        /// <summary>
+        /// The fields of the bound elements were changed from outside, e.g. Apply style: show their values
+        /// </summary>
+        internal void UpdateFromElements() => UpdateFromBoundElements();
 
         /// <summary>
         /// Updates this instance using the respective fields from the bound elements.
@@ -216,7 +253,7 @@ namespace Greenshot.Editor.Drawing.Fields
 
                 drawableContainerField.Value = field.Value;
                 // update last used from DC field, so that scope is honored
-                EditorConfig.UpdateLastFieldValue(drawableContainerField);
+                EditorConfigurationHelper.UpdateLastFieldValue(EditorConfig, drawableContainerField);
             }
         }
     }

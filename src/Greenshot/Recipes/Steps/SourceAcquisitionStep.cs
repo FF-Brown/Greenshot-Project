@@ -1,0 +1,624 @@
+/*
+ * Greenshot - a free and open source screenshot tool
+ * Copyright (C) 2007-2026 Thomas Braun, Jens Klingen, Robin Krom
+ *
+ * For more information see: https://getgreenshot.org/
+ * The Greenshot project is hosted on GitHub https://github.com/greenshot/greenshot
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using Dapplo.Ini;
+using Dapplo.Windows.Common.Extensions;
+using Dapplo.Windows.Common.Structs;
+using Dapplo.Windows.Desktop;
+using Dapplo.Windows.User32;
+using Greenshot.Base.Capturing;
+using Greenshot.Base.Core;
+using Greenshot.Base.Hdr;
+using Greenshot.Base.Interfaces;
+
+using Greenshot.Base.Recipes;
+using Greenshot.Base.Recipes.Contracts;
+using Greenshot.Base.Recipes.Pipeline;
+using Greenshot.Base.Recipes.Sources;
+using Greenshot.Capturing;
+using Greenshot.Capturing.Tools;
+using log4net;
+using Greenshot.Base.Threading;
+#if !GREENSHOT_LIGHT
+using Greenshot.Ai;
+#endif
+
+namespace Greenshot.Recipes.Steps
+{
+    /// <summary>
+    /// Pipeline step responsible for pre-capture preparation (delay, tray reset),
+    /// raw pixel acquisition from screen, window, file, or clipboard, and pixel DPI alignment.
+    /// Evaluates configuration settings (e.g. mouse cursor, delay) dynamically at runtime.
+    /// </summary>
+    [StepInfo(WellKnownStepTypes.Source, "Acquire Source", "Acquires the image: captures the screen, a region, a window, the clipboard, a file or the current editor. A capture handed to the flow (forwarded from another recipe, imported from the browser extension) is used instead of capturing.", "Acquisition")]
+    [StepPayload(RawCapture = PayloadRequirement.Created, Surface = PayloadRequirement.Created)]
+    [StepParameter("SourceType", ContractDataType.Enum, DefaultValue = "Region", SupportsExpressions = false, Description = "What to capture", AllowedValues = new[] { "Region", "Window", "ActiveWindow", "FullScreen", "LastRegion", "Clipboard", "File", "TextOcr", "CurrentEditor", "Extension" })]
+    [StepParameter("Filename", ContractDataType.FilePath, Description = "File to load (SourceType File); default: variable Filename")]
+    [StepParameter("CaptureMouseCursor", ContractDataType.Boolean, Description = "Include the mouse cursor (default: settings)")]
+    [StepParameter("DelayMs", ContractDataType.Integer, Description = "Delay before capturing in milliseconds (default: settings)")]
+    [StepParameter("ScreenCaptureMode", ContractDataType.Enum, Description = "Which screen(s) to capture for FullScreen (default: settings)", AllowedValues = new[] { "Auto", "FullScreen", "Fixed" })]
+    [StepParameter("WindowTitlePattern", ContractDataType.String, Description = "Capture the window whose title matches this regular expression (SourceType Window)")]
+    [StepParameter("ProcessName", ContractDataType.String, Description = "Capture the window of this process (SourceType Window)")]
+    [StepParameter("WindowHandle", ContractDataType.Window, Description = "Capture this window without asking or activating it (SourceType Window): the variable of a Window argument (e.g. ${var.Window}) or a window handle")]
+    [StepParameter("MatchCase", ContractDataType.Boolean, Description = "Match WindowTitlePattern and ProcessName case-sensitively")]
+    [StepParameter(ActiveWindowCaptureSource.WhenNoWindowParameter, ContractDataType.Enum, DefaultValue = ActiveWindowCaptureSource.WhenNoWindowScreen, SupportsExpressions = false, Description = "When no window matches WindowTitlePattern or ProcessName (SourceType Window): Screen captures the active window, else the whole screen; Stop ends the flow with a message", AllowedValues = new[] { ActiveWindowCaptureSource.WhenNoWindowScreen, ActiveWindowCaptureSource.WhenNoWindowStop })]
+    [StepParameter("AlignDpi", ContractDataType.Boolean, DefaultValue = true, Description = "Set the image resolution to the screen DPI")]
+    [StepParameter(ScreenModeParameter, ContractDataType.Enum, DefaultValue = "Auto", SupportsExpressions = false, Description = "Select a region or window on the live or on the frozen screen (SourceType Region or Window with a selection). Auto: the Freeze screen setting. An HDR capture (Hdr) is clearer on the live screen, where the selection shows what is captured.", AllowedValues = new[] { "Auto", "Live", "Frozen" })]
+    [StepParameter(HdrParameter, ContractDataType.Boolean, Description = "Capture with the HDR content of HDR displays (screen, region, window, last region): the capture keeps it, e.g. for the HdrFormat of SaveFile or a JPEG XR file (default: settings). Only HDR displays are kept, the SDR displays are in the normal image.")]
+    [StepInputVariable("PreSuppliedRegion", ContractDataType.Object, Description = "Region to capture without asking (set by the caller)")]
+    [StepInputVariable("CaptureDelay", ContractDataType.Integer, Description = "Overrides DelayMs")]
+    [StepInputVariable("CaptureMouseCursor", ContractDataType.Boolean, Description = "Overrides the CaptureMouseCursor parameter")]
+    [StepInputVariable("ScreenCaptureMode", ContractDataType.Enum, Description = "Overrides the ScreenCaptureMode parameter")]
+    [StepInputVariable("TargetWindow", ContractDataType.Object, Description = "Window to capture (set by the caller)")]
+    [StepInputVariable("WindowTitlePattern", ContractDataType.String, Description = "Window title pattern, when the parameter is not set")]
+    [StepInputVariable("ProcessName", ContractDataType.String, Description = "Process name, when the parameter is not set")]
+    [StepInputVariable("MatchCase", ContractDataType.Boolean, Description = "Match case, when the parameter is not set")]
+    [StepInputVariable("Filename", ContractDataType.FilePath, Description = "File to load (SourceType File), when the parameter is not set")]
+    [StepInputVariable("EditorForm", ContractDataType.Object, Description = "The editor to take the image from (SourceType CurrentEditor, set by the editor trigger)")]
+    [StepOutputVariable("SelectedWindow", ContractDataType.Object, "The window of the last region (SourceType LastRegion)", Conditional = true)]
+    public class SourceAcquisitionStep : ICaptureStep, IRequiresRecipeAuthorization
+    {
+        private static readonly ILog Log = LogManager.GetLogger(typeof(SourceAcquisitionStep));
+        private static readonly ICoreConfiguration CoreConfig = IniConfigRegistry.GetSection<ICoreConfiguration>();
+
+        public string Name { get; }
+        public RecipeNodeConfig Config { get; }
+
+        /// <summary>
+        /// Loading a file (SourceType File) reads from the file system: the user has to allow file system access
+        /// </summary>
+        public IEnumerable<RecipeGatedAction> GetGatedActions()
+        {
+            if (string.Equals(Config.GetParameter<string>("SourceType"), "File", StringComparison.OrdinalIgnoreCase))
+            {
+                string filename = Config.GetParameter<string>("Filename");
+                yield return new RecipeGatedAction(RecipeGateType.FileSystemAccess,
+                    string.IsNullOrWhiteSpace(filename) ? "Reads the image file named in the variable Filename" : $"Reads the image file {filename}");
+            }
+        }
+
+        private readonly ICaptureWindowPreparer _windowPreparer;
+
+        /// <param name="config">RecipeNodeConfig</param>
+        /// <param name="windowPreparer">Opens the window of the interactive selection while the screen is captured, optional</param>
+        public SourceAcquisitionStep(RecipeNodeConfig config, ICaptureWindowPreparer windowPreparer = null)
+        {
+            Config = config ?? throw new ArgumentNullException(nameof(config));
+            Name = config.Name ?? "SourceAcquisitionStep";
+            _windowPreparer = windowPreparer;
+        }
+
+        public async Task ExecuteAsync(CaptureFlowContext context, CancellationToken cancellationToken = default)
+        {
+            // 0. Check if payload is already pre-supplied (e.g. browser extension capture or programmatic injection)
+            if (context.Payload != null)
+            {
+                Log.Info($"Source {Name} using pre-supplied capture payload.");
+                context.IsPayloadPreSupplied = true;
+                if (Config.GetParameter("AlignDpi", true))
+                {
+                    AlignDpi(context.Payload);
+                }
+                return;
+            }
+
+            // 1. Pre-capture preparation: tray icon reset & delay
+            await PreparePreCaptureAsync(context, cancellationToken).ConfigureAwait(false);
+            if (context.IsAborted || cancellationToken.IsCancellationRequested) return;
+
+            // 2. Resolve mouse capture setting dynamically
+            bool captureMouse = ResolveCaptureMouse(context);
+
+            // 3. Resolve source type & DPI alignment setting
+            CaptureSourceType sourceType = Config.GetParameter("SourceType", CaptureSourceType.Region);
+            bool alignDpi = Config.GetParameter("AlignDpi", true);
+
+            // The capture knows whether it is taken with the HDR content, whatever uses it later; also for the selection on the live screen
+            var hdr = Config.GetParameter<bool?>(HdrParameter);
+            context.CaptureHdr = hdr ?? CoreConfig.CaptureHdr;
+            context.CaptureHdrRequested = hdr == true;
+
+            // 4. Handle pre-supplied region (e.g. command-line or programmatic region capture)
+            if (context.Properties.TryGetValue("PreSuppliedRegion", out var regionObj) &&
+                regionObj is NativeRect preRect && !preRect.IsEmpty)
+            {
+                var composite = CreateScreenWithCursorSource(captureMouse, "PreSuppliedRegionSource");
+                var payload = await composite.AcquireAsync(context, cancellationToken).ConfigureAwait(false);
+
+                if (payload?.RawCapture != null )
+                {
+#if !GREENSHOT_LIGHT
+                    RedactForAiTool(context, payload);
+#endif
+                    // Offset to bitmap coordinates for cropping
+                    NativeRect screenOffsetRect = preRect.Offset(-payload.RawCapture.Location.X, -payload.RawCapture.Location.Y);
+                    payload.RawCapture.Crop(screenOffsetRect);
+                    if (context.CaptureHdrRequested)
+                    {
+                        HdrParts.MarkRequested(payload.RawCapture);
+                    }
+                }
+                if (alignDpi && payload != null)
+                {
+                    AlignDpi(payload);
+                }
+                context.Payload = payload;
+                return;
+            }
+
+            // A given window (WindowHandle): captured directly, with its exact contents, without activating it
+            if (sourceType == CaptureSourceType.Window && Config.GetParameter<object>("WindowHandle") is { } windowHandle)
+            {
+#if GREENSHOT_LIGHT
+                // The window of an AI tool's Window argument: Greenshot Light has no AI tools
+                context.Fail($"Capturing a given window ({windowHandle}) is not available in Greenshot Light.");
+#else
+                await AcquireWindowAsync(context, windowHandle, alignDpi, cancellationToken).ConfigureAwait(false);
+#endif
+                return;
+            }
+
+            // Check if window targeting parameters are specified in config
+            bool hasTargetWindowConfig = !string.IsNullOrEmpty(Config.GetParameter<string>("WindowTitlePattern")) ||
+                                         !string.IsNullOrEmpty(Config.GetParameter<string>("ProcessName"));
+
+            bool liveSelection = UseLiveSelection(context, sourceType, hasTargetWindowConfig, Config.GetParameter<string>(ScreenModeParameter));
+
+            // 5. Instantiate source based on SourceType
+            ICaptureSource source = sourceType switch
+            {
+                CaptureSourceType.Window when hasTargetWindowConfig =>
+                    captureMouse
+                        ? new CompositeCaptureSource("TargetWindowWithCursor", new ICaptureSource[] { new ActiveWindowCaptureSource(Config), new CursorCaptureSource() })
+                        : new ActiveWindowCaptureSource(Config),
+
+                // The screen isn't frozen: nothing is captured before the selection, see InteractiveSelectionStep
+                CaptureSourceType.Region or CaptureSourceType.Window when liveSelection =>
+                    captureMouse
+                        ? new CompositeCaptureSource("LiveScreenWithCursor", new ICaptureSource[] { new LiveScreenCaptureSource(), new CursorCaptureSource() })
+                        : new LiveScreenCaptureSource(),
+
+                CaptureSourceType.Region or CaptureSourceType.Window or CaptureSourceType.TextOcr =>
+                    CreateScreenWithCursorSource(captureMouse, "InteractiveBaseSource", ScreenCaptureMode.FullScreen),
+
+                CaptureSourceType.FullScreen =>
+                    CreateScreenWithCursorSource(captureMouse, "FullScreenSource", ResolveScreenCaptureMode(context)),
+
+                CaptureSourceType.ActiveWindow =>
+                    captureMouse
+                        ? new CompositeCaptureSource("ActiveWindowWithCursor", new ICaptureSource[] { new ActiveWindowCaptureSource(Config), new CursorCaptureSource() })
+                        : new ActiveWindowCaptureSource(Config),
+
+                CaptureSourceType.LastRegion =>
+                    captureMouse
+                        ? new CompositeCaptureSource("LastRegionWithCursor", new ICaptureSource[] { new LastRegionCaptureSource(), new CursorCaptureSource() })
+                        : new LastRegionCaptureSource(),
+
+                CaptureSourceType.Clipboard =>
+                    new ClipboardCaptureSource(),
+
+                CaptureSourceType.File =>
+                    new FileCaptureSource(Config),
+
+                CaptureSourceType.CurrentEditor =>
+                    new CurrentEditorCaptureSource(),
+
+                CaptureSourceType.Extension =>
+                    null,
+
+                _ => null
+            };
+
+            if (source == null)
+            {
+                if (sourceType == CaptureSourceType.Extension)
+                {
+                    context.Fail("Extension capture source requires a pre-supplied image payload.");
+                }
+                else
+                {
+                    context.Fail($"Unsupported capture source type: {sourceType}");
+                }
+                return;
+            }
+
+            // The window of the selection is built while the screen is captured
+            if (_windowPreparer != null && sourceType is CaptureSourceType.Region or CaptureSourceType.Window or CaptureSourceType.TextOcr &&
+                !hasTargetWindowConfig && HasInteractiveSelection(context))
+            {
+                _windowPreparer.PrepareWindow(InteractiveSelectionStep.GetSnapWindowsAsync(cancellationToken));
+            }
+
+            var acquired = await source.AcquireAsync(context, cancellationToken).ConfigureAwait(false);
+            if (acquired != null)
+            {
+                // Clipboard, file and editor contents are the user's, everything else is taken from the screen
+                bool fromScreen = sourceType != CaptureSourceType.Clipboard && sourceType != CaptureSourceType.File && sourceType != CaptureSourceType.CurrentEditor;
+#if !GREENSHOT_LIGHT
+                if (fromScreen)
+                {
+                    RedactForAiTool(context, acquired);
+                }
+#endif
+                // The fixed size capture offers the window again, in the window of its program
+                if (sourceType == CaptureSourceType.ActiveWindow || sourceType == CaptureSourceType.Window && hasTargetWindowConfig)
+                {
+                    RememberWindowCapture(context, acquired.RawCapture);
+                }
+                // Align DPI for raw captured pixels (screen, window, active window, region, last region)
+                if (alignDpi && sourceType != CaptureSourceType.File)
+                {
+                    AlignDpi(acquired);
+                }
+                if (fromScreen && acquired.RawCapture != null)
+                {
+                    ProcessScreenCapture(context, acquired.RawCapture);
+                }
+                // Without joining the HDR parts of a frozen screen: that waits for the selection
+                if (context.CaptureHdrRequested)
+                {
+                    HdrParts.MarkRequested(acquired.RawCapture);
+                }
+                context.Payload = acquired;
+            }
+            else if (!context.IsAborted)
+            {
+                context.Abort("Acquisition failed or produced no payload.");
+            }
+        }
+
+        /// <summary>
+        /// Adds a capture of a window to the recent captures of the fixed size capture, not when it fell back to the screen
+        /// </summary>
+        private static void RememberWindowCapture(CaptureFlowContext context, ICapture capture)
+        {
+            if (capture?.Image == null || !capture.CaptureDetails.MetaData.TryGetValue("source", out var source) || source != "Window")
+            {
+                return;
+            }
+            var bounds = new NativeRect(capture.Location, new NativeSize(capture.Image.Width, capture.Image.Height));
+            // Configuration is written on the UI thread (single writer, its change events have UI subscribers)
+            context.Ui.InvokeAsync(() => FixedSizeCaptureTool.RememberArea(bounds, WindowHelper.GetVisibleWindows()), CancellationToken.None)
+                .FireAndLog("Remember the window capture for the fixed size capture", Log);
+        }
+
+#if !GREENSHOT_LIGHT
+        /// <summary>
+        /// Captures the window of the WindowHandle parameter. For AI tools windows of excluded processes are refused.
+        /// </summary>
+        private async Task AcquireWindowAsync(CaptureFlowContext context, object windowHandle, bool alignDpi, CancellationToken cancellationToken)
+        {
+            var window = AiToolCapture.ResolveWindow(windowHandle);
+            if (window == null)
+            {
+                context.Fail($"The window to capture ({windowHandle}) doesn't exist (anymore).");
+                return;
+            }
+            if (AiToolCapture.IsAiToolRun(context))
+            {
+                string processName = window.GetProcessName();
+                if (AiToolAccess.IsProcessExcluded(processName))
+                {
+                    context.Fail($"Windows of '{processName}' are excluded from AI tools.");
+                    return;
+                }
+            }
+
+            var capture = await AiToolCapture.CaptureWindowAsync(window, cancellationToken).ConfigureAwait(false);
+            if (capture?.Image == null)
+            {
+                capture?.Dispose();
+                context.Fail($"Capturing the window '{window.GetCaption()}' failed.");
+                return;
+            }
+
+            var payload = new CapturePayload(capture);
+            // A capture of the window's area of the screen can contain what covers the window
+            if (!AiToolCapture.IsWindowContentOnly(capture))
+            {
+                RedactForAiTool(context, payload);
+            }
+            if (alignDpi)
+            {
+                AlignDpi(payload);
+            }
+            context.Payload = payload;
+        }
+
+        /// <summary>
+        /// AI tools never see windows of excluded processes (password managers by default): they are blacked out in screen captures.
+        /// </summary>
+        private static void RedactForAiTool(CaptureFlowContext context, ICapturePayload payload)
+        {
+            if (!AiToolCapture.IsAiToolRun(context) || payload?.RawCapture?.Image == null)
+            {
+                return;
+            }
+            // A new capture of the screen (L in the selection) would show the excluded windows
+            payload.RawCapture.CaptureDetails.AddMetaData(LiveScreenCaptureSource.FrozenOnlyKey, "true");
+            // The windows are blacked out in the 8-bit image only: the HDR content would still show them
+            payload.RawCapture.HdrImage = null;
+            int redacted = AiToolCapture.RedactExcludedWindows(payload.RawCapture.Image, payload.RawCapture.Location);
+            if (redacted > 0)
+            {
+                context.LogStep($"Blacked out {redacted} window(s) of applications excluded from AI tools.");
+            }
+        }
+#endif
+
+        /// <summary>
+        /// What every capture of the screen gets: the title fixes of the settings, and the processors switched on in the settings
+        /// (the QR code scan) start in the background, so what they find shows up while selecting.
+        /// A live selection has no image yet, it gets no processors.
+        /// </summary>
+        private static void ProcessScreenCapture(CaptureFlowContext context, ICapture capture)
+        {
+            TitleFix.Apply(capture.CaptureDetails);
+            if (capture.Image == null)
+            {
+                return;
+            }
+            if (CoreConfig.ReadApplicationText && !IsAiToolRun(context))
+            {
+                // The text of the applications, an AI tool doesn't get it: windows excluded from AI tools are only blacked out in the pixels
+                ApplicationText.Start(capture);
+            }
+            foreach (var processor in SimpleServiceProvider.Current.GetAllInstances<IProcessor>().Where(p => p.isActive))
+            {
+                Log.DebugFormat("Starting processor {0}", processor.Designation);
+                processor.ProcessCapture(capture);
+            }
+        }
+
+        private static void AlignDpi(ICapturePayload payload)
+        {
+            if (payload?.RawCapture == null) return;
+
+            float dpiX = 96f;
+            float dpiY = 96f;
+            try
+            {
+                using (Graphics graphics = Graphics.FromHwnd(User32Api.GetDesktopWindow()))
+                {
+                    dpiX = graphics.DpiX;
+                    dpiY = graphics.DpiY;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Failed to retrieve screen DPI via desktop window, falling back to 96 DPI", ex);
+            }
+
+            if (payload.RawCapture.CaptureDetails != null)
+            {
+                payload.RawCapture.CaptureDetails.DpiX = dpiX;
+                payload.RawCapture.CaptureDetails.DpiY = dpiY;
+            }
+
+            if (payload.RawCapture.Image is Bitmap bmp)
+            {
+                bmp.SetResolution(dpiX, dpiY);
+            }
+        }
+
+        private static ICaptureSource CreateScreenWithCursorSource(bool captureMouse, string name, ScreenCaptureMode mode = ScreenCaptureMode.FullScreen)
+        {
+            if (captureMouse)
+            {
+                return new CompositeCaptureSource(name, new ICaptureSource[]
+                {
+                    new ScreenCaptureSource(mode),
+                    new CursorCaptureSource()
+                });
+            }
+            return new ScreenCaptureSource(mode);
+        }
+
+        private ScreenCaptureMode ResolveScreenCaptureMode(CaptureFlowContext context)
+        {
+            // Priority 1: Runtime context property (e.g. from context menu dropdown "All" or caller)
+            if (context.Properties.TryGetValue("ScreenCaptureMode", out var scmObj) && scmObj is ScreenCaptureMode scm)
+            {
+                return scm;
+            }
+
+            // Priority 2: Recipe step configuration parameter
+            var stepMode = Config.GetParameter<string>("ScreenCaptureMode");
+            if (!string.IsNullOrEmpty(stepMode) && Enum.TryParse<ScreenCaptureMode>(stepMode, ignoreCase: true, out var parsedMode))
+            {
+                return parsedMode;
+            }
+
+            // Priority 3: User configuration
+            return CoreConfig.ScreenCaptureMode;
+        }
+
+        private bool ResolveCaptureMouse(CaptureFlowContext context)
+        {
+            // Priority 1: Runtime context property (e.g. from trigger parameter or CaptureHelper caller)
+            if (context.Properties.TryGetValue("CaptureMouseCursor", out var ctxVal) && ctxVal is bool ctxBool)
+            {
+                return ctxBool;
+            }
+
+            // Priority 2: Explicit parameter pre-defined on the recipe step
+            if (Config.Parameters.TryGetValue("CaptureMouseCursor", out var stepVal) && stepVal != null)
+            {
+                if (stepVal is bool stepBool) return stepBool;
+                if (bool.TryParse(stepVal.ToString(), out bool parsedBool)) return parsedBool;
+            }
+
+            // Priority 3: Dynamic evaluation of user configuration at runtime
+            return CoreConfig.CaptureMousepointer;
+        }
+
+        /// <summary>
+        /// The sources which capture the screen: only they wait before the capture (CaptureWait)
+        /// </summary>
+        private static bool CapturesScreen(CaptureSourceType sourceType) => sourceType switch
+        {
+            CaptureSourceType.Region => true,
+            CaptureSourceType.Window => true,
+            CaptureSourceType.ActiveWindow => true,
+            CaptureSourceType.FullScreen => true,
+            CaptureSourceType.LastRegion => true,
+            CaptureSourceType.TextOcr => true,
+            _ => false
+        };
+
+        /// <summary>
+        /// The parameter which selects on the live or on the frozen screen: Auto (the setting), Live or Frozen
+        /// </summary>
+        internal const string ScreenModeParameter = "ScreenMode";
+
+        /// <summary>
+        /// Capture with the HDR content, see CaptureFlowContext.CaptureHdr
+        /// </summary>
+        internal const string HdrParameter = HdrOutput.SourceParameterName;
+
+        /// <summary>
+        /// Select on the live screen instead of a frozen capture: when the user turned freezing off (or the recipe's ScreenMode is Live),
+        /// for a region or window selection of the user. Text (OCR) needs the capture of the screen, AI tools need it to black out excluded windows.
+        /// A screen reader only says the selection on the frozen screen, unless the recipe asks for the live screen.
+        /// </summary>
+        internal static bool UseLiveSelection(CaptureFlowContext context, CaptureSourceType sourceType, bool hasTargetWindowConfig, string screenMode = null)
+        {
+            bool forceLive = string.Equals(screenMode, "Live", StringComparison.OrdinalIgnoreCase);
+            bool forceFrozen = string.Equals(screenMode, "Frozen", StringComparison.OrdinalIgnoreCase);
+            if (forceFrozen || (CoreConfig.CaptureFreezeScreen && !forceLive) || sourceType is not (CaptureSourceType.Region or CaptureSourceType.Window) || hasTargetWindowConfig)
+            {
+                return false;
+            }
+            var selections = context.Recipe?.Nodes?.Where(node => string.Equals(node?.StepType, WellKnownStepTypes.InteractiveSelection, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (selections == null || selections.Count == 0 || selections.Any(node => node.GetParameter("SelectionMode", CaptureMode.Region) == CaptureMode.Text))
+            {
+                return false;
+            }
+#if !GREENSHOT_LIGHT
+            if (AiToolCapture.IsAiToolRun(context))
+            {
+                return false;
+            }
+#endif
+            if (!LiveScreenCaptureSource.IsSupported)
+            {
+                Log.Info("Selecting on the live screen needs Windows 10 2004 or newer, the screen is frozen.");
+                return false;
+            }
+            if (!forceLive && !CoreConfig.IgnoreScreenReader && User32Api.IsScreenReaderRunning())
+            {
+                // The live screen can't take the focus from the application below, so a screen reader can't say the selection: frozen, L switches
+                Log.Info("The screen reader flag of Windows is on, the selection starts on the frozen screen (IgnoreScreenReader=true ignores the flag).");
+                return false;
+            }
+            return true;
+        }
+
+        private static bool IsAiToolRun(CaptureFlowContext context)
+        {
+#if !GREENSHOT_LIGHT
+            return AiToolCapture.IsAiToolRun(context);
+#else
+            return false;
+#endif
+        }
+
+        private static bool HasInteractiveSelection(CaptureFlowContext context) =>
+            context.Recipe?.Nodes?.Any(node => string.Equals(node?.StepType, WellKnownStepTypes.InteractiveSelection, StringComparison.OrdinalIgnoreCase)) == true;
+
+        private async Task PreparePreCaptureAsync(CaptureFlowContext context, CancellationToken ct)
+        {
+            // Dismiss lingering tray balloons
+            bool isTerminalServer = !CoreConfig.DisableRDPOptimizing && (CoreConfig.OptimizeForRDP || SystemInformation.TerminalServerSession);
+            if (!CoreConfig.HideTrayicon && !isTerminalServer)
+            {
+                var trayIcon = SimpleServiceProvider.Current.GetInstance<ITrayIcon>(isOptional: true);
+                if (trayIcon != null)
+                {
+                    // The tray icon belongs to the UI thread; awaited, so the balloon is gone before the capture
+                    await context.Ui.RunOnUiAsync(() =>
+                    {
+                        try
+                        {
+                            trayIcon.HideBalloon();
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Warn("Failed to hide the tray balloon", ex);
+                        }
+                    }, ct).ConfigureAwait(false);
+                }
+            }
+
+            if (!CapturesScreen(Config.GetParameter("SourceType", CaptureSourceType.Region)))
+            {
+                return;
+            }
+
+            // The wait before the capture: Context -> Step config -> the settings (CaptureWait, off by default: no wait at all).
+            // A menu which started the capture waited until it was gone already (ThemedMenu).
+            int delay = -1;
+            bool showCountdown = CoreConfig.CaptureWaitCountdown;
+            if (context.Properties.TryGetValue("CaptureDelay", out var ctxDelay) && ctxDelay is int cd)
+            {
+                delay = cd;
+            }
+            else if (Config.Parameters.TryGetValue("DelayMs", out var stepDelay) && stepDelay != null)
+            {
+                if (stepDelay is int sd) delay = sd;
+                else if (int.TryParse(stepDelay.ToString(), out int parsedDelay)) delay = parsedDelay;
+            }
+
+            if (delay < 0)
+            {
+                delay = CoreConfig.CaptureWait ? CoreConfig.CaptureWaitMilliseconds : 0;
+            }
+
+            if (delay <= 0)
+            {
+                return;
+            }
+
+            context.LogStep($"Waiting pre-capture delay: {delay}ms");
+            var wait = TimeSpan.FromMilliseconds(delay);
+            bool interactive = context.UserInteraction?.IsInteractive == true;
+            // A second or more is time to open a menu or popup: with a countdown, which doesn't take the focus
+            bool countdown = showCountdown && wait >= CaptureCountdown.ShownFrom && interactive;
+            Log.Info($"Waiting {delay} ms before the capture, countdown: {countdown} (setting {showCountdown}, interactive {interactive}).");
+            if (countdown)
+            {
+                if (!await CaptureCountdown.WaitAsync(context, wait, ct).ConfigureAwait(false))
+                {
+                    context.Abort("The user cancelled the wait before the capture.");
+                }
+                return;
+            }
+            await Task.Delay(wait, ct).ConfigureAwait(false);
+        }
+    }
+}
